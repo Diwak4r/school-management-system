@@ -1,0 +1,52 @@
+# Dependencies
+/node_modules/
+
+# Next.js
+/.next/
+/out/
+
+# Production build
+/dist/
+/build/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Deployment and local tools
+.vercel/
+.vinext/
+.cloudflare/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Local database configuration
+.neon
+
+# Backup files
+*.backup
+*.bak
+*.flashTo-backup
+*.audit-backup
+*.before-*
+*.pg-backup
+*-backup
+
+# Local-only backups, editor settings and generated check artifacts
+project-fix-backups/
+.vscode/
+build-check.txt
+tsc-check.txt
+check-subjects.ts
