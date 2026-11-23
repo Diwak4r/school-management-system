@@ -11,44 +11,79 @@ export default function ContactPage() {
   return (
     <>
       <SiteHeader />
-      <main className="bg-slate-50">
-        <section className="bg-slate-950 px-5 py-20 text-white">
-          <div className="mx-auto max-w-7xl">
-            <p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400">Contact us</p>
-            <h1 className="mt-5 max-w-3xl text-4xl font-black tracking-tight sm:text-5xl">Let us talk about your school.</h1>
-            <p className="mt-6 max-w-2xl leading-8 text-slate-300">
-              Interested in a demonstration or school onboarding? Start a conversation about your institution needs.
-            </p>
-          </div>
+      <main className="bg-paper text-ink">
+        <section className="marketing-wrap border-b border-line py-16 lg:py-24">
+          <p className="eyebrow-dark">Contact</p>
+          <h1 className="display-title mt-6 max-w-3xl">
+            Let us talk about your school.
+          </h1>
+          <p className="lede-dark">
+            Tell us how your office keeps records today and we will show you
+            what changes when they live in one place.
+          </p>
         </section>
-        <section className="mx-auto grid max-w-7xl gap-8 px-5 py-16 lg:grid-cols-2">
-          <div className="rounded-3xl border border-slate-200 bg-white p-8">
-            <h2 className="text-2xl font-black text-slate-900">Request a platform discussion</h2>
-            <p className="mt-4 leading-7 text-slate-600">
-              We can discuss your school size, current record-keeping process, required modules and possible implementation steps.
-            </p>
-            <div className="mt-8 space-y-4">
-              <div className="rounded-xl bg-slate-50 p-5">
-                <div className="text-sm font-bold text-slate-900">School onboarding</div>
-                <p className="mt-1 text-sm leading-6 text-slate-600">Share your institution details before account provisioning is enabled.</p>
+
+        <section className="marketing-wrap grid gap-12 py-16 md:grid-cols-[1.1fr_0.9fr]">
+          <div>
+            <h2 className="section-title text-2xl">What we can discuss</h2>
+            <div className="mt-8 border-t border-line">
+              <div className="grid gap-3 border-b border-line py-6 sm:grid-cols-[150px_1fr]">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                  School onboarding
+                </p>
+                <p className="text-sm leading-7 text-inksoft">
+                  Your school details, the modules you need and the people who
+                  will use each part of the system.
+                </p>
               </div>
-              <div className="rounded-xl bg-slate-50 p-5">
-                <div className="text-sm font-bold text-slate-900">Product demonstration</div>
-                <p className="mt-1 text-sm leading-6 text-slate-600">Review the modules and discuss how they may fit your school workflow.</p>
+              <div className="grid gap-3 border-b border-line py-6 sm:grid-cols-[150px_1fr]">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                  Demonstration
+                </p>
+                <p className="text-sm leading-7 text-inksoft">
+                  A walk through attendance, exams, fees and marksheets using
+                  examples from a school day.
+                </p>
+              </div>
+              <div className="grid gap-3 border-b border-line py-6 sm:grid-cols-[150px_1fr]">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted">
+                  Location
+                </p>
+                <p className="text-sm leading-7 text-inksoft">
+                  Harion-8 (Betali), Sarlahi, Nepal
+                </p>
               </div>
             </div>
-          </div>
-          <div className="rounded-3xl bg-emerald-700 p-8 text-white">
-            <h2 className="text-2xl font-black">Ready to explore?</h2>
-            <p className="mt-4 leading-7 text-emerald-50">
-              The enquiry delivery channel will be connected after the platform contact details and backend are configured. No form submissions are collected on this page yet.
+
+            <p className="mt-8 max-w-lg text-xs leading-6 text-muted">
+              The enquiry form will be connected after the school contact
+              details and delivery channel are configured. This page does not
+              collect submissions yet.
             </p>
-            <Link href="/register" className="mt-8 inline-flex rounded-xl bg-white px-6 py-3 font-extrabold text-emerald-800 hover:bg-emerald-50">
-              View school onboarding
+          </div>
+
+          <div className="bg-forest-deep px-8 py-10 text-paper">
+            <p className="eyebrow-light">Before you write</p>
+            <h2 className="font-display text-2xl font-semibold mt-4">
+              A few useful details.
+            </h2>
+            <ul className="mt-7 space-y-4 text-sm text-paper/75">
+              <li className="border-b border-paper/15 pb-4">Number of students and classes</li>
+              <li className="border-b border-paper/15 pb-4">Whether fees are handled in the office</li>
+              <li className="border-b border-paper/15 pb-4">Which roles need access</li>
+              <li>When you would like to start</li>
+            </ul>
+            <Link
+              href="/register"
+              className="mt-9 inline-flex items-center gap-2 text-sm font-semibold text-saffron underline-offset-4 hover:underline"
+            >
+              See school onboarding <span aria-hidden="true">→</span>
             </Link>
-            <div className="mt-8 border-t border-emerald-500 pt-6">
-              <p className="text-sm text-emerald-100">Already have a school account?</p>
-              <Link href="/login" className="mt-2 inline-block font-bold text-white underline underline-offset-4">Go to school login</Link>
+            <div className="mt-8 border-t border-paper/15 pt-6 text-sm">
+              <p className="text-paper/60">Already have an account?</p>
+              <Link href="/login" className="mt-1 inline-block font-semibold text-paper">
+                Go to school login
+              </Link>
             </div>
           </div>
         </section>

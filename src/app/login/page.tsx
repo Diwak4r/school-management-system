@@ -1,9 +1,9 @@
 
-import Image from "next/image";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { login } from "@/actions/auth";
 import { Icon, DemoFill, Flash } from "@/components/ui";
+import { SchoolMark } from "@/components/SchoolMark";
 import { DEFAULT_SCHOOL } from "@/lib/grading";
 
 export const dynamic = "force-dynamic";
@@ -52,18 +52,9 @@ export default async function PortalPage({
     <div className="min-h-screen grid lg:grid-cols-[1.05fr_1fr]">
       {/* Brand panel */}
       <div className="relative bg-forest-deep text-white overflow-hidden flex flex-col justify-between p-8 sm:p-12">
-        <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-forest/40 blur-3xl" />
-        <div className="absolute -bottom-32 -left-16 w-96 h-96 rounded-full bg-saffron/15 blur-3xl" />
-
         <div className="relative">
           <div className="flex items-center gap-3.5">
-            <Image
-              src="/images/emblem.png"
-              alt="School emblem"
-              width={56}
-              height={56}
-              className="w-14 h-14 rounded-full ring-2 ring-white/20 bg-white/95"
-            />
+            <SchoolMark light large />
 
             <div>
               <div className="font-display text-xl font-bold leading-tight">
@@ -115,13 +106,7 @@ export default async function PortalPage({
       <div className="paper-bg flex items-center justify-center p-6 sm:p-10">
         <div className="w-full max-w-md fade-up">
           <div className="lg:hidden flex items-center gap-3 mb-8">
-            <Image
-              src="/images/emblem.png"
-              alt=""
-              width={44}
-              height={44}
-              className="w-11 h-11 rounded-full bg-white"
-            />
+            <SchoolMark />
 
             <div>
               <div className="font-display font-bold text-ink leading-tight">

@@ -8,49 +8,58 @@ export const metadata: Metadata = {
 };
 
 const steps = [
-  ["1", "School information", "Prepare your school name, address, contact details and basic institutional information."],
-  ["2", "Requirement discussion", "Identify the modules, user roles and workflows your school needs."],
-  ["3", "Secure setup", "The platform team will configure a separate school environment and authorized administrator access."],
-  ["4", "Training and launch", "Review the setup, train relevant users and agree on a launch plan."],
+  ["01", "School information", "School name, address, contact details and basic institutional information."],
+  ["02", "Requirement discussion", "The modules, user roles and workflows your school actually uses."],
+  ["03", "Secure setup", "A separate school environment and authorised administrator access."],
+  ["04", "Training and launch", "Review the setup, train the people who use it and agree a launch date."],
 ];
 
 export default function RegisterPage() {
   return (
     <>
       <SiteHeader />
-      <main>
-        <section className="bg-slate-950 px-5 py-20 text-white lg:py-24">
-          <div className="mx-auto max-w-7xl">
-            <p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400">School onboarding</p>
-            <h1 className="mt-5 max-w-3xl text-4xl font-black leading-tight tracking-tight sm:text-5xl">Bring your school onto ShikshaSetu.</h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-              We are preparing a secure registration and onboarding process for schools. Account creation will become available after school data isolation and administrator controls are implemented.
-            </p>
-          </div>
+      <main className="bg-paper text-ink">
+        <section className="marketing-wrap border-b border-line py-16 lg:py-24">
+          <p className="eyebrow-dark">School onboarding</p>
+          <h1 className="display-title mt-6 max-w-3xl">
+            Bring your school onto ShikshaSetu.
+          </h1>
+          <p className="lede-dark">
+            Registration is being prepared carefully. This page explains the
+            steps so your school can gather what it needs in advance.
+          </p>
         </section>
-        <section className="bg-slate-50 px-5 py-20">
-          <div className="mx-auto max-w-5xl">
-            <h2 className="text-3xl font-black text-slate-900">How onboarding will work</h2>
-            <div className="mt-10 space-y-5">
-              {steps.map(([number, title, description]) => (
-                <div key={number} className="flex gap-5 rounded-2xl border border-slate-200 bg-white p-6">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-100 font-black text-emerald-800">{number}</div>
-                  <div>
-                    <h3 className="font-extrabold text-slate-900">{title}</h3>
-                    <p className="mt-2 text-sm leading-7 text-slate-600">{description}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-10 rounded-3xl border border-emerald-200 bg-emerald-50 p-8">
-              <h3 className="text-xl font-black text-slate-900">Registration is not open yet</h3>
-              <p className="mt-3 text-sm leading-7 text-slate-700">
-                This page explains the planned onboarding process. It does not create an account, activate a subscription or grant administrator access.
+
+        <section className="marketing-wrap py-16">
+          <h2 className="section-title text-2xl">How onboarding will work</h2>
+          <div className="mt-10 border-t border-line">
+            {steps.map(([number, title, description]) => (
+              <div
+                key={number}
+                className="grid gap-4 border-b border-line py-7 md:grid-cols-[64px_1fr_1.3fr] md:items-baseline"
+              >
+                <span className="font-display text-sm text-saffron-dark">
+                  {number}
+                </span>
+                <h3 className="text-base font-semibold text-ink">{title}</h3>
+                <p className="text-sm leading-7 text-inksoft">{description}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="paper-card mt-10 flex flex-col gap-6 px-8 py-9 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="font-display text-xl font-semibold">
+                Registration is not open yet.
+              </h3>
+              <p className="mt-2 max-w-xl text-sm leading-7 text-inksoft">
+                This page does not create an account, activate a subscription
+                or grant administrator access.
               </p>
-              <Link href="/contact" className="mt-6 inline-flex rounded-xl bg-emerald-700 px-6 py-3 text-sm font-extrabold text-white hover:bg-emerald-800">
-                Discuss school onboarding
-              </Link>
             </div>
+            <Link href="/contact" className="marketing-btn self-start">
+              Discuss onboarding <span aria-hidden="true">→</span>
+            </Link>
           </div>
         </section>
       </main>
