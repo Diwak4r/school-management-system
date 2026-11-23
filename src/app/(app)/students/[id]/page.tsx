@@ -32,7 +32,9 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       .select({
         id: enrollments.id,
         className: classes.name,
+        classId: enrollments.classId,
         section: sections.name,
+        sectionId: enrollments.sectionId,
         rollNo: enrollments.rollNo,
         year: sql<string>`academic_years.name`,
         status: enrollments.status,
@@ -40,7 +42,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       })
       .from(enrollments)
       .innerJoin(classes, eq(classes.id, enrollments.classId))
-      .innerJoin(sections, eq(sections.id, enrollments.sectionId))
+      .leftJoin(sections, eq(sections.id, enrollments.sectionId))
       .innerJoin(academicYears, eq(academicYears.id, enrollments.academicYearId))
       .where(eq(enrollments.studentId, studentId))
       .orderBy(desc(enrollments.createdAt)),
@@ -151,15 +153,15 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
             <h1 className="font-display text-2xl font-bold text-ink">{st.name}</h1>
             <div className="flex flex-wrap items-center gap-2 mt-1.5">
               <Badge tone="green">{st.admissionNo}</Badge>
-              {active && <Badge tone="blue">{active.className} â€“ {active.section} Â· Roll {active.rollNo ?? "â€”"}</Badge>}
-              <Badge tone="gray">{st.gender ?? "â€”"}</Badge>
+              {active && <Badge tone="blue">{active.className} – {active.section} · Roll {active.rollNo ?? "—"}</Badge>}
+              <Badge tone="gray">{st.gender ?? "—"}</Badge>
               {dobAge != null && <Badge tone="gray">{dobAge} yrs</Badge>}
             </div>
           </div>
           {canEdit && (
             <div className="flex gap-2">
-              <FormModal title={`Edit â€” ${st.name}`} btnClass="btn-ghost" icon="edit" label="Edit" wide>
-                <StudentForm classes={classesAll} sections={sectionsAll} student={{ ...st, admissionDate: active?.admissionDate }} classId={null} sectionId={null} rollNo={null} />
+              <FormModal title={`Edit — ${st.name}`} btnClass="btn-ghost" icon="edit" label="Edit" wide>
+                <StudentForm classes={classesAll} sections={sectionsAll} student={{ ...st, admissionDate: active?.admissionDate }} classId={active?.classId ?? null} sectionId={active?.sectionId ?? null} rollNo={active?.rollNo ?? null} />
               </FormModal>
               <ConfirmButton
                 action={deleteStudent}
@@ -181,13 +183,13 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
           <dl className="space-y-2.5 text-sm">
             {[
               ["Date of birth", fmtDate(st.dob)],
-              ["Age", dobAge != null ? `${dobAge} years` : "â€”"],
-              ["Blood group", st.bloodGroup ?? "â€”"],
-              ["Nationality", st.nationality ?? "â€”"],
-              ["Contact", st.contact ?? "â€”"],
-              ["Email", st.email ?? "â€”"],
-              ["Address", st.address ?? "â€”"],
-              ["Previous school", st.previousSchool ?? "â€”"],
+              ["Age", dobAge != null ? `${dobAge} years` : "—"],
+              ["Blood group", st.bloodGroup ?? "—"],
+              ["Nationality", st.nationality ?? "—"],
+              ["Contact", st.contact ?? "—"],
+              ["Email", st.email ?? "—"],
+              ["Address", st.address ?? "—"],
+              ["Previous school", st.previousSchool ?? "—"],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3">
                 <dt className="text-muted">{k}</dt>
@@ -198,11 +200,11 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
           <h3 className="font-bold text-sm text-ink mt-5 mb-3 border-t border-linesoft pt-4">Family & guardian</h3>
           <dl className="space-y-2.5 text-sm">
             {[
-              ["Father", st.fatherName ?? "â€”"],
-              ["Mother", st.motherName ?? "â€”"],
-              ["Guardian", st.guardianName ?? "â€”"],
-              ["Guardian contact", st.guardianContact ?? "â€”"],
-              ["Occupation", st.guardianOccupation ?? "â€”"],
+              ["Father", st.fatherName ?? "—"],
+              ["Mother", st.motherName ?? "—"],
+              ["Guardian", st.guardianName ?? "—"],
+              ["Guardian contact", st.guardianContact ?? "—"],
+              ["Occupation", st.guardianOccupation ?? "—"],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3">
                 <dt className="text-muted">{k}</dt>
@@ -258,8 +260,8 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
               {enrollmentsAll.map((e) => (
                 <li key={e.id} className="flex items-center gap-3 rounded-lg border border-linesoft px-3 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-bold">{e.className} â€“ {e.section}</div>
-                    <div className="text-[11px] text-muted">Roll {e.rollNo ?? "â€”"} Â· {e.year}</div>
+                    <div className="text-sm font-bold">{e.className} – {e.section}</div>
+                    <div className="text-[11px] text-muted">Roll {e.rollNo ?? "—"} · {e.year}</div>
                   </div>
                   <Badge tone={e.status === "active" ? "green" : e.status === "promoted" ? "blue" : "gray"}>{e.status}</Badge>
                 </li>
@@ -276,7 +278,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
                   <Icon name="file" className="w-4 h-4 text-forest shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] font-semibold truncate">{nt.title}</div>
-                    <div className="text-[11px] text-muted">{nt.subject ?? "General"} Â· {fmtDate(nt.created)}</div>
+                    <div className="text-[11px] text-muted">{nt.subject ?? "General"} · {fmtDate(nt.created)}</div>
                   </div>
                   {nt.url && (
                     <a href={nt.url} target="_blank" rel="noreferrer" className="text-xs font-bold text-forest hover:underline">
@@ -293,7 +295,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
       <div className="card overflow-hidden mt-3.5">
         <div className="px-5 pt-4 pb-1 flex items-center justify-between">
           <h3 className="font-bold text-sm text-ink">Examination results</h3>
-          <Link href="/results" className="text-xs font-bold text-forest hover:underline">All results â†’</Link>
+          <Link href="/results" className="text-xs font-bold text-forest hover:underline">All results →</Link>
         </div>
         {resultRows.length === 0 ? (
           <Empty icon="file" title="No published results yet" sub="Published examination results will appear here with marksheets." />
@@ -307,8 +309,8 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
                 <tr key={r.examId}>
                   <td className="font-bold">{r.examName}</td>
                   <td className="text-muted">{fmtDate(r.endDate)}</td>
-                  <td>â€”</td>
-                  <td>{r.pct != null ? `${r.pct}%` : "â€”"}</td>
+                  <td>—</td>
+                  <td>{r.pct != null ? `${r.pct}%` : "—"}</td>
                   <td className="font-bold text-forest">{r.gpa}</td>
                   <td>{r.status === "PASS" ? <Badge tone="green">PASS</Badge> : r.status === "FAIL" ? <Badge tone="red">FAIL</Badge> : <Badge tone="amber">PENDING</Badge>}</td>
                   <td className="text-right">

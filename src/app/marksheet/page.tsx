@@ -75,6 +75,10 @@ export default async function MarksheetPage({
 
   if (!exam) notFound();
 
+  if ((user.role === "student" || user.role === "parent") && exam.exam.status !== "published") {
+    redirect("/results");
+  }
+
   const [student] = await db
     .select()
     .from(students)
@@ -93,13 +97,11 @@ export default async function MarksheetPage({
     .where(eq(examSubjects.examId, examId));
 
   const classIds = new Set(examSubjectsOf.map((e) => e.classId));
-  const classId = classIds.has(0)
-    ? null
-    : examSubjectsOf[0]?.classId ?? null;
 
   const [enr] = await db
     .select({
       className: classes.name,
+      classId: enrollments.classId,
       section: sections.name,
       rollNo: enrollments.rollNo,
     })
@@ -119,13 +121,14 @@ export default async function MarksheetPage({
       ),
     )
     .limit(1);
+  const classId = enr?.classId ?? null;
 
   const [scale, school, att] = await Promise.all([
     getScale(),
     getSchool(),
     attendancePct(
       studentId,
-      new Date("2024-04-14"),
+      exam.exam.startDate ? new Date(`${exam.exam.startDate}T00:00:00`) : undefined,
       new Date(),
     ),
   ]);
@@ -145,15 +148,7 @@ export default async function MarksheetPage({
     )
     .where(
       and(
-        classIds.size > 0
-          ? or(
-              inArray(
-                classSubjects.classId,
-                Array.from(classIds),
-              ),
-              isNull(classSubjects.classId),
-            )
-          : undefined,
+        classId ? eq(classSubjects.classId, classId) : isNull(classSubjects.classId),
         eq(classSubjects.isClassTeacher, true),
       ),
     )

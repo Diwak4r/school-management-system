@@ -59,6 +59,7 @@ export async function saveScaleRow(formData: FormData) {
 
   const user = await requireRole("admin");
 
+  const id = Number(formData.get("id") ?? 0);
   const grade = String(formData.get("grade") ?? "").trim();
   const minPct = Number(formData.get("minPct"));
   const maxPct = Number(formData.get("maxPct"));
@@ -71,13 +72,12 @@ export async function saveScaleRow(formData: FormData) {
     return;
   }
 
-  await db
-    .insert(gradingScale)
-    .values({ grade, minPct, maxPct, points10, isFail, sortOrder })
-    .onConflictDoUpdate({
-      target: gradingScale.id,
-      set: { grade, minPct, maxPct, points10, isFail, sortOrder },
-    });
+  const values = { grade, minPct, maxPct, points10, isFail, sortOrder };
+  if (id > 0) {
+    await db.update(gradingScale).set(values).where(eq(gradingScale.id, id));
+  } else {
+    await db.insert(gradingScale).values(values);
+  }
 
   await logAudit(
     user.id,

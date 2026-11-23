@@ -482,7 +482,7 @@ export default async function FeesPage() {
           <Field label="Fee structure">
             <select className="inp" name="structureId" required defaultValue="">
               <option value="" disabled>Select fee structure</option>
-              {structures.map((s) => <option key={s.id} value={s.id}>{s.className} Â· {s.category} Â· {s.yearName} Â· {money(s.amountPaisa)}</option>)}
+              {structures.map((s) => <option key={s.id} value={s.id}>{s.className} · {s.category} · {s.yearName} · {money(s.amountPaisa)}</option>)}
             </select>
           </Field>
           <Field label="Due date"><input className="inp" name="dueDate" type="date" required /></Field>
@@ -519,6 +519,7 @@ export default async function FeesPage() {
                     <select className="inp w-24" name="paymentMethod" defaultValue="cash">
                       <option value="cash">Cash</option><option value="bank">Bank</option><option value="online">Online</option><option value="cheque">Cheque</option>
                     </select>
+                    <input className="inp w-32" name="transactionRef" placeholder="Ref / cheque no." />
                     <button className="btn-primary btn-sm">Collect</button>
                   </form>
                 ) : <Badge tone="green">Fully paid</Badge>}</td>

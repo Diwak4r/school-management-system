@@ -132,8 +132,8 @@ export default async function InvoicePrintPage({
             <p><strong>Due Date:</strong> {dateText(invoice.dueDate)}</p>
           </div>
           <div>
-            <p><strong>Academic Year:</strong> {year[0]?.name ?? "â€”"}</p>
-            <p><strong>Class:</strong> {classRow[0]?.name ?? "â€”"}</p>
+            <p><strong>Academic Year:</strong> {year[0]?.name ?? "—"}</p>
+            <p><strong>Class:</strong> {classRow[0]?.name ?? "—"}</p>
             <p><strong>Status:</strong> {balance <= 0 ? "Paid" : paid > 0 ? "Partially Paid" : invoice.status}</p>
           </div>
         </div>
@@ -143,8 +143,8 @@ export default async function InvoicePrintPage({
           <div className="grid grid-cols-2 gap-3 text-sm">
             <p><strong>Name:</strong> {student[0].name}</p>
             <p><strong>Admission No:</strong> {student[0].admissionNo}</p>
-            <p><strong>Father&apos;s Name:</strong> {student[0].fatherName || "â€”"}</p>
-            <p><strong>Contact:</strong> {student[0].contact || "â€”"}</p>
+            <p><strong>Father&apos;s Name:</strong> {student[0].fatherName || "—"}</p>
+            <p><strong>Contact:</strong> {student[0].contact || "—"}</p>
           </div>
         </div>
 

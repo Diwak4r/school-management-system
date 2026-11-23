@@ -1,10 +1,10 @@
 ﻿"use server";
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { db } from "@/db";
-import { users, sessions } from "@/db/schema";
+import { users, sessions, students } from "@/db/schema";
 import { createSession, destroySession, hashPassword, logAudit, requireUser, verifyPassword } from "@/lib/auth";
 
 export async function flashTo(path: string, msg?: string, err = false) {
@@ -21,6 +21,16 @@ export async function login(formData: FormData) {
   const user = rows[0];
   if (!user || !verifyPassword(password, user.passwordHash)) {
     redirect("/login?err=Invalid email or password. Please try again.");
+  }
+  if (user.studentId) {
+    const [activeStudent] = await db
+      .select({ id: students.id })
+      .from(students)
+      .where(and(eq(students.id, user.studentId), isNull(students.deletedAt)))
+      .limit(1);
+    if (!activeStudent) {
+      redirect("/login?err=Invalid email or password. Please try again.");
+    }
   }
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
   await createSession(user.id);

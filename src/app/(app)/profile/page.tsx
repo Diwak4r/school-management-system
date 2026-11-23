@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { users, students } from "@/db/schema";
 import { requireUser, logAudit } from "@/lib/auth";
@@ -24,11 +24,22 @@ export async function saveMyProfile(formData: FormData) {
     await logAudit(user.id, "Updated own profile", "student", studentId);
     await flashTo("/profile", "Profile updated.");
   } else {
+    const rawEmail = s(formData.get("email"));
+    const email = rawEmail ? rawEmail.toLowerCase() : user.email;
+    if (email !== user.email) {
+      const duplicate = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.email, email), ne(users.id, user.id)))
+        .limit(1);
+      if (duplicate.length > 0) {
+        await flashTo("/profile", "That email address is already in use.", true);
+        return;
+      }
+    }
     await db
       .update(users)
-      .set({
-        email: s(formData.get("email")) ?? user.email,
-      })
+      .set({ email })
       .where(eq(users.id, user.id));
     await logAudit(user.id, "Updated own profile", "user", user.id);
     await flashTo("/profile", "Profile updated.");

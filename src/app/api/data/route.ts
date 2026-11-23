@@ -529,7 +529,7 @@ export async function POST(req: Request) {
     "academic_years", "classes", "sections", "subjects", "students", "teachers",
     "users", "parent_children", "class_subjects", "enrollments", "attendance",
     "examinations", "exam_subjects", "marks", "notes", "notices", "grading_scale",
-    "settings", "audit_logs", "fee_categories", "fee_structures", "fee_invoices",
+    "audit_logs", "fee_categories", "fee_structures", "fee_invoices",
     "fee_invoice_items", "fee_payments", "sessions",
   ];
   for (const tableName of sequenceTables) {

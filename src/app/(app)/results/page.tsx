@@ -284,7 +284,7 @@ async function MyResults({ studentId, userId, initialStudent }: { studentId: num
                   <td className="text-muted">{r.exam.year}</td>
                   <td>{r.pct != null ? `${r.pct}%` : "—"}</td>
                   <td className="font-extrabold text-forest">{r.gpa}</td>
-                  <td>{r.result === "PASS" ? <Badge tone="green">PASS</Badge> : <Badge tone="red">FAIL</Badge>}</td>
+                  <td>{r.result === "PASS" ? <Badge tone="green">PASS</Badge> : r.result === "PENDING" ? <Badge tone="gray">PENDING</Badge> : <Badge tone="red">FAIL</Badge>}</td>
                   <td className="text-right">
                     <Link href={`/marksheet?exam=${r.exam.id}&student=${effStudent}`} className="inline-flex items-center gap-1.5 btn-ghost btn-sm">
                       <Icon name="printer" className="w-3.5 h-3.5" /> View / print

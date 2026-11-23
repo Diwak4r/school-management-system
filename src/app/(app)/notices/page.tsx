@@ -16,8 +16,8 @@ export async function publishNotice(formData: FormData) {
   const body = String(formData.get("body") ?? "").trim();
   const priority = String(formData.get("priority") ?? "normal");
   const expiresAt = formData.get("expiresAt") ? new Date(String(formData.get("expiresAt")) + "T23:59:59") : null;
-  const classId = user.role === "admin" && formData.get("classId") ? Number(formData.get("classId")) : null;
-  const sectionId = user.role === "admin" && formData.get("sectionId") ? Number(formData.get("sectionId")) : null;
+  const classId = formData.get("classId") ? Number(formData.get("classId")) : null;
+  const sectionId = formData.get("sectionId") ? Number(formData.get("sectionId")) : null;
   if (!title || !body) await flashTo("/notices", "Title and description are required.", true);
 
   if (user.role === "teacher" && classId) {

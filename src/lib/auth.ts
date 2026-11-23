@@ -2,9 +2,9 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { users, sessions, auditLogs } from "@/db/schema";
+import { users, sessions, auditLogs, students } from "@/db/schema";
 
 const COOKIE = "sms_session";
 const SESSION_DAYS = 7;
@@ -64,7 +64,8 @@ export async function getSessionUser() {
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
-    .where(eq(sessions.token, token))
+    .leftJoin(students, eq(students.id, users.studentId))
+    .where(and(eq(sessions.token, token), or(isNull(users.studentId), isNull(students.deletedAt))))
     .limit(1);
   const row = rows[0];
   if (!row) return null;

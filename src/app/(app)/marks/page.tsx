@@ -41,6 +41,14 @@ export async function submitMarks(formData: FormData) {
     if (!a) await flashTo("/marks", "You are not assigned to this class & subject.", true);
   }
 
+  const allowedRows = sub.exam.classId === 0
+    ? await db.select({ studentId: enrollments.studentId }).from(enrollments).where(eq(enrollments.status, "active"))
+    : await db
+        .select({ studentId: enrollments.studentId })
+        .from(enrollments)
+        .where(and(eq(enrollments.classId, sub.exam.classId), eq(enrollments.status, "active")));
+  const allowedStudentIds = new Set(allowedRows.map((r) => r.studentId));
+
   const theoryFull = sub.exam.fullMarks - sub.exam.practicalMarks;
   const practicalFull = sub.exam.practicalMarks;
 
@@ -51,6 +59,10 @@ export async function submitMarks(formData: FormData) {
     if (!key.startsWith("t")) continue;
 
     const studentId = Number(key.slice(1));
+    if (!Number.isInteger(studentId) || !allowedStudentIds.has(studentId)) {
+      invalid++;
+      continue;
+    }
     const tRaw = formData.get(key) as string;
     const pRaw = formData.get(`p${studentId}`) as string;
 
@@ -81,13 +93,13 @@ export async function submitMarks(formData: FormData) {
   }
 
   if (invalid > 0) {
-    await flashTo(`/marks?exam=${sub.e.id}&examSubjectId=${examSubjectId}`, `Saved ${saved} student(s). ${invalid} entr${invalid === 1 ? "y was" : "ies were"} rejected â€” check the full marks limits.`, true);
+    await flashTo(`/marks?exam=${sub.e.id}&examSubjectId=${examSubjectId}`, `Saved ${saved} student(s). ${invalid} entr${invalid === 1 ? "y was" : "ies were"} rejected — check the full marks limits.`, true);
     return;
   }
 
   const [examRow] = await db.select().from(examinations).where(eq(examinations.id, sub.e.id)).limit(1);
 
-  await logAudit(user.id, "Entered marks", "marks", examSubjectId, `${saved} student(s) â€” ${examRow?.name}`);
+  await logAudit(user.id, "Entered marks", "marks", examSubjectId, `${saved} student(s) — ${examRow?.name}`);
 
   await flashTo(`/marks?exam=${sub.e.id}&examSubjectId=${examSubjectId}`, `Marks saved for ${saved} student(s).`);
 }
@@ -227,7 +239,7 @@ export default async function MarksPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <PageHead title="Mark Entry" sub="Enter theory and practical marks â€” validated against full marks" />
+      <PageHead title="Mark Entry" sub="Enter theory and practical marks — validated against full marks" />
 
       <MarksSelection
         exams={exams}

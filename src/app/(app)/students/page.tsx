@@ -2,7 +2,7 @@
 import { redirect } from "next/navigation";
 import { eq, and, sql, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { students, enrollments, classes, sections, academicYears, attendance } from "@/db/schema";
+import { students, enrollments, classes, sections, academicYears, attendance, users, sessions } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Badge, FormModal, ModalCancel, Field, ConfirmButton, Icon, Empty } from "@/components/ui";
@@ -235,8 +235,12 @@ export async function deleteStudent(formData: FormData) {
   const id = Number(formData.get("id"));
   const [row] = await db.select().from(students).where(eq(students.id, id)).limit(1);
   await db.update(students).set({ deletedAt: new Date() }).where(eq(students.id, id));
+  const linkedUsers = await db.select({ userId: users.id }).from(users).where(eq(users.studentId, id));
+  if (linkedUsers.length > 0) {
+    await db.delete(sessions).where(inArray(sessions.userId, linkedUsers.map((u) => u.userId)));
+  }
   await logAudit(user.id, "Removed student", "student", id, row?.name);
-  await flashTo("/students", "Student removed (soft delete â€” history preserved).");
+  await flashTo("/students", "Student removed (soft delete — history preserved).");
 }
 
 function s(v: FormDataEntryValue | null) {
@@ -316,7 +320,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHead title="Students" sub={`${rows.length} students Â· Academic year ${activeYear?.name ?? "â€”"}`}>
+      <PageHead title="Students" sub={`${rows.length} students · Academic year ${activeYear?.name ?? "—"}`}>
         {isAdmin && (
           <FormModal title="Admit new student" icon="plus" label="Add student" wide>
             <StudentForm classes={allClasses} sections={allSections} />
@@ -327,7 +331,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
       <form className="card p-3.5 mb-4 grid grid-cols-2 md:grid-cols-5 gap-2.5 no-print">
         <div className="relative col-span-2 md:col-span-2">
           <Icon name="search" className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input name="q" defaultValue={q} placeholder="Search name or admission noâ€¦" className="inp pl-9" />
+          <input name="q" defaultValue={q} placeholder="Search name or admission no…" className="inp pl-9" />
         </div>
         <select name="classId" defaultValue={classId ?? ""} className="inp">
           <option value="">All classes</option>
@@ -353,7 +357,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
 
       <div className="card overflow-hidden">
         {rows.length === 0 ? (
-          <Empty icon="cap" title="No students found" sub={q ? `Nothing matches â€œ${q}â€. Try a different search.` : "Add your first student to get started."} />
+          <Empty icon="cap" title="No students found" sub={q ? `Nothing matches “${q}”. Try a different search.` : "Add your first student to get started."} />
         ) : (
           <div className="overflow-x-auto">
             <table className="tbl min-w-[860px]">
@@ -361,7 +365,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
                 <tr>
                   <th>Student</th>
                   <th>Adm. No.</th>
-                  <th>Class â€“ Sec</th>
+                  <th>Class – Sec</th>
                   <th>Roll</th>
                   <th>Father</th>
                   <th>Attendance</th>
@@ -382,16 +386,16 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
                         </Link>
                       </td>
                       <td className="text-inksoft font-mono text-xs">{r.student.admissionNo}</td>
-                      <td>{r.className ? `${r.className} â€“ ${r.section}` : <span className="text-muted">Not enrolled</span>}</td>
-                      <td>{r.rollNo ?? "â€”"}</td>
-                      <td className="text-inksoft">{r.student.fatherName ?? "â€”"}</td>
+                      <td>{r.className ? `${r.className} – ${r.section}` : <span className="text-muted">Not enrolled</span>}</td>
+                      <td>{r.rollNo ?? "—"}</td>
+                      <td className="text-inksoft">{r.student.fatherName ?? "—"}</td>
                       <td>
-                        {pct == null ? <span className="text-muted">â€”</span> : <span className={`font-bold ${pct >= 75 ? "text-forest" : "text-danger"}`}>{pct}%</span>}
+                        {pct == null ? <span className="text-muted">—</span> : <span className={`font-bold ${pct >= 75 ? "text-forest" : "text-danger"}`}>{pct}%</span>}
                       </td>
                       <td>{r.className ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Unassigned</Badge>}</td>
                       {isAdmin && (
                         <td className="text-right whitespace-nowrap">
-                          <FormModal title={`Edit â€” ${r.student.name}`} btnClass="btn-ghost btn-sm" icon="edit" label="Edit" wide>
+                          <FormModal title={`Edit — ${r.student.name}`} btnClass="btn-ghost btn-sm" icon="edit" label="Edit" wide>
                             <StudentForm classes={allClasses} sections={allSections} student={r.student} classId={r.classId} sectionId={r.sectionId} rollNo={r.rollNo} />
                           </FormModal>
                           <span className="inline-block w-1" />
@@ -448,7 +452,7 @@ export function StudentForm({
       </Field>
       <Field label="Gender">
         <select name="gender" defaultValue={student?.gender ?? ""} className="inp">
-          <option value="">â€”</option>
+          <option value="">—</option>
           <option>Female</option>
           <option>Male</option>
         </select>
@@ -470,7 +474,7 @@ export function StudentForm({
       </Field>
       <Field label="Blood group">
         <select name="bloodGroup" defaultValue={student?.bloodGroup ?? ""} className="inp">
-          <option value="">â€”</option>
+          <option value="">—</option>
           {["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"].map((b) => (
             <option key={b}>{b}</option>
           ))}

@@ -3,6 +3,7 @@
 
 # Next.js
 /.next/
+/.next-stale-*/
 /out/
 
 # Production build
@@ -50,3 +51,6 @@ project-fix-backups/
 build-check.txt
 tsc-check.txt
 check-subjects.ts
+
+# WorkBuddy session data
+.workbuddy-ai/

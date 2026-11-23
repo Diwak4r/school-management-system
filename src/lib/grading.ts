@@ -44,7 +44,7 @@ export function gradeFor(
   scale: ScaleRow[],
 ): { grade: string; points10: number; fail: boolean } {
   const row =
-    scale.find((s) => pct >= s.minPct && pct <= s.maxPct && !s.isFail) ??
+    scale.find((s) => pct >= s.minPct && pct < s.maxPct + 1 && !s.isFail) ??
     scale.find((s) => s.isFail);
 
   if (!row) return { grade: "F", points10: 0, fail: true };

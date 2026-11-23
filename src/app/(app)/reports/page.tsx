@@ -77,12 +77,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             <tr key={x.adm}>
               <td className="font-semibold">{x.name}</td>
               <td className="font-mono text-xs">{x.adm}</td>
-              <td>{x.cls ?? "â€”"}</td>
-              <td>{x.sec ?? "â€”"}</td>
-              <td>{x.roll ?? "â€”"}</td>
-              <td>{x.gender ?? "â€”"}</td>
-              <td>{x.father ?? "â€”"}</td>
-              <td>{x.contact ?? "â€”"}</td>
+              <td>{x.cls ?? "—"}</td>
+              <td>{x.sec ?? "—"}</td>
+              <td>{x.roll ?? "—"}</td>
+              <td>{x.gender ?? "—"}</td>
+              <td>{x.father ?? "—"}</td>
+              <td>{x.contact ?? "—"}</td>
             </tr>
           ))}
         </tbody>
@@ -197,7 +197,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             <tr key={x.cls}>
               <td className="font-bold">{x.cls}</td>
               <td>{x.marked}</td>
-              <td className="font-bold">{x.marked ? `${x.pct}%` : "â€”"}</td>
+              <td className="font-bold">{x.marked ? `${x.pct}%` : "—"}</td>
               <td>{x.marked ? (x.pct >= 75 ? <Badge tone="green">OK</Badge> : <Badge tone="red">Below 75%</Badge>) : <Badge tone="gray">No data</Badge>}</td>
             </tr>
           ))}
@@ -214,7 +214,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     if (!exam) {
       body = <Empty icon="file" title="No published examination yet" sub="Publish an examination to generate result reports." />;
     } else if (r === "results") {
-      title = `Results â€” ${exam.name}`;
+      title = `Results — ${exam.name}`;
       const rows: { cls: string; total: number; done: number; pass: number; avgPct: number; avgGpa: number }[] = [];
       for (const c of allClasses) {
         const res = await computeClassResults(exam.id, c.id, scale);
@@ -239,7 +239,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                 <td>{x.total}</td>
                 <td>{x.done}</td>
                 <td className="font-bold text-forest">{x.pass}</td>
-                <td>{x.done ? `${Math.round((x.pass / x.done) * 100)}%` : "â€”"}</td>
+                <td>{x.done ? `${Math.round((x.pass / x.done) * 100)}%` : "—"}</td>
                 <td>{x.avgPct}%</td>
                 <td className="font-bold">{x.avgGpa.toFixed(1)}</td>
               </tr>
@@ -248,7 +248,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </table>
       );
     } else if (r === "subject") {
-      title = `Subject-wise results â€” ${exam.name}`;
+      title = `Subject-wise results — ${exam.name}`;
       const rows: { cls: string; subject: string; avg: number; pass: number; total: number }[] = [];
       for (const c of allClasses) {
         const res = await computeClassResults(exam.id, c.id, scale);
@@ -284,7 +284,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </table>
       );
     } else {
-      title = `Grade distribution â€” ${exam.name}`;
+      title = `Grade distribution — ${exam.name}`;
       const counts: Record<string, number> = {};
       let total = 0;
       for (const c of allClasses) {
@@ -332,8 +332,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             <tr key={t.id} className={t.status !== "active" ? "opacity-60" : ""}>
               <td className="font-semibold">{t.name}</td>
               <td className="font-mono text-xs">{t.employeeNo}</td>
-              <td>{t.phone ?? "â€”"}</td>
-              <td>{t.qualification ?? "â€”"}</td>
+              <td>{t.phone ?? "—"}</td>
+              <td>{t.qualification ?? "—"}</td>
               <td>{subjects}</td>
               <td>{t.status === "active" ? <Badge tone="green">Active</Badge> : <Badge tone="gray">Inactive</Badge>}</td>
             </tr>

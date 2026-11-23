@@ -68,7 +68,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
   if (user.role === "student") return <Mine studentId={user.studentId!} />;
   if (user.role === "parent") return <ChildView userId={user.id} initialChild={sp.child ? Number(sp.child) : null} />;
 
-  if (mode === "report") return <Report />;
+  if (mode === "report") return <Report searchParams={sp} />;
   return <Register mode={mode} classId={sp.classId ? Number(sp.classId) : null} sectionId={sp.sectionId ? Number(sp.sectionId) : null} date={sp.date ? String(sp.date) : todayStr()} user={user} />;
 }
 
@@ -120,7 +120,8 @@ async function Register({ classId, sectionId, date, user }: { classId: number | 
         )}
       </PageHead>
 
-      <div className="card p-3.5 mb-4 grid grid-cols-2 md:grid-cols-4 gap-2.5">
+      <form method="get" action="/attendance" className="card p-3.5 mb-4 grid grid-cols-2 md:grid-cols-4 gap-2.5">
+        <input type="hidden" name="mode" value="mark" />
         <Field label="Class">
           <select name="classId" defaultValue={effClass ?? ""} className="inp">
             {availableClasses.map((c) => (
@@ -140,11 +141,11 @@ async function Register({ classId, sectionId, date, user }: { classId: number | 
           <input name="date" type="date" defaultValue={date} max={todayStr()} className="inp" />
         </Field>
         <div className="flex items-end">
-          <button className="btn-primary w-full">
-            <Icon name="check" className="w-4 h-4" /> Save register
+          <button type="submit" className="btn-primary w-full">
+            <Icon name="check" className="w-4 h-4" /> Load register
           </button>
         </div>
-      </div>
+      </form>
 
       <div className="card overflow-hidden">
         {roster.length === 0 ? (
@@ -204,16 +205,16 @@ async function Register({ classId, sectionId, date, user }: { classId: number | 
 
 /* ---------------------------------- Report ---------------------------------- */
 
-async function Report() {
+async function Report({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   await requireRole("admin");
   const [allClasses, allSections, activeYear] = await Promise.all([
     db.select().from(classes).orderBy(classes.sortOrder),
     db.select().from(sections).orderBy(sections.name),
     db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1),
   ]);
-  const effClass = allClasses[allClasses.length - 1]?.id ?? null;
+  const effClass = searchParams.classId ? Number(searchParams.classId) : allClasses[allClasses.length - 1]?.id ?? null;
   const effSections = allSections.filter((s) => s.classId === effClass);
-  const effSection = effSections[0]?.id ?? null;
+  const effSection = searchParams.sectionId ? Number(searchParams.sectionId) : effSections[0]?.id ?? null;
 
   const roster = await db
     .select({ student: students, rollNo: enrollments.rollNo })
@@ -222,11 +223,15 @@ async function Report() {
     .where(and(eq(enrollments.classId, effClass ?? -1), effSection ? eq(enrollments.sectionId, effSection) : sql`true`, eq(enrollments.status, "active")))
     .orderBy(enrollments.rollNo);
 
-  const from = addDays(new Date(), -29);
+  const fromParam = String(searchParams.from ?? "");
+  const fromDate = /^\d{4}-\d{2}-\d{2}$/.test(fromParam)
+    ? new Date(`${fromParam}T00:00:00`)
+    : new Date(`${addDays(new Date(), -29)}T00:00:00`);
+  const from = fromDate.toISOString().slice(0, 10);
   const to = todayStr();
   const rows = await Promise.all(
     roster.map(async (r) => {
-      const p = await attendancePct(r.student.id, new Date(from), new Date(to));
+      const p = await attendancePct(r.student.id, fromDate, new Date(to));
       return { r, p };
     }),
   );
@@ -239,6 +244,7 @@ async function Report() {
       </PageHead>
 
       <form className="card p-3.5 mb-4 grid grid-cols-2 md:grid-cols-4 gap-2.5">
+        <input type="hidden" name="mode" value="report" />
         <Field label="Class">
           <select name="classId" defaultValue={effClass} className="inp">
             {allClasses.map((c) => (

@@ -46,14 +46,19 @@ export async function saveAssignment(formData: FormData) {
   if (!classId || !subjectId) await flashTo("/classes", "Select a class and subject.", true);
 
   const existing = await db.select().from(classSubjects).where(and(eq(classSubjects.classId, classId), eq(classSubjects.subjectId, subjectId))).limit(1);
-  if (existing.length > 0) {
-    await db.update(classSubjects).set({ teacherId, isClassTeacher }).where(eq(classSubjects.id, existing[0].id));
+  let savedId = existing[0]?.id;
+  if (savedId !== undefined) {
+    await db.update(classSubjects).set({ teacherId, isClassTeacher }).where(eq(classSubjects.id, savedId));
   } else {
-    await db.insert(classSubjects).values({ classId, subjectId, teacherId, isClassTeacher });
+    const [inserted] = await db
+      .insert(classSubjects)
+      .values({ classId, subjectId, teacherId, isClassTeacher })
+      .returning({ id: classSubjects.id });
+    savedId = inserted.id;
   }
   if (isClassTeacher) {
     // only one class teacher per class
-    await db.update(classSubjects).set({ isClassTeacher: false }).where(and(eq(classSubjects.classId, classId), sql`${classSubjects.id} != ${existing[0]?.id ?? -1}`));
+    await db.update(classSubjects).set({ isClassTeacher: false }).where(and(eq(classSubjects.classId, classId), sql`${classSubjects.id} != ${savedId}`));
   }
   const [c] = await db.select().from(classes).where(eq(classes.id, classId)).limit(1);
   const [sb] = await db.select().from(subjects).where(eq(subjects.id, subjectId)).limit(1);

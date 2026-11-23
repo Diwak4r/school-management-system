@@ -143,8 +143,8 @@ export default async function ReceiptPrintPage({
           <div className="grid grid-cols-2 gap-4 py-5 text-sm">
             <p><strong>Student:</strong> {student[0].name}</p>
             <p><strong>Admission No:</strong> {student[0].admissionNo}</p>
-            <p><strong>Class:</strong> {classRow[0]?.name ?? "â€”"}</p>
-            <p><strong>Academic Year:</strong> {year[0]?.name ?? "â€”"}</p>
+            <p><strong>Class:</strong> {classRow[0]?.name ?? "—"}</p>
+            <p><strong>Academic Year:</strong> {year[0]?.name ?? "—"}</p>
             <p><strong>Invoice No:</strong> {invoice.invoiceNo}</p>
             <p><strong>Payment Method:</strong> {payment.paymentMethod}</p>
             {payment.transactionRef && (

@@ -18,23 +18,14 @@ export async function promoteStudents(formData: FormData) {
   if (!fromClass || !toClass) await flashTo("/promotion", "Select source and destination classes.", true);
   if (ids.length === 0) await flashTo("/promotion", "Select at least one student to promote.", true);
 
-  // ensure the destination year exists (next fiscal year after the active one)
   const [activeYear] = await db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1);
-  let targetYearId: number;
-  if (activeYear) {
-    const cur = parseInt(activeYear.name.split("/")[0], 10) || 2082;
-    const nextName = `${cur + 1}/${cur + 2}`;
-    const [existing] = await db.select().from(academicYears).where(eq(academicYears.name, nextName)).limit(1);
-    if (existing) targetYearId = existing.id;
-    else {
-      const [created] = await db.insert(academicYears).values({ name: nextName, status: "archived" }).returning({ id: academicYears.id });
-      targetYearId = created.id;
-    }
-  } else {
-    const [any] = await db.select().from(academicYears).orderBy(desc(academicYears.id)).limit(1);
-    if (!any) await flashTo("/promotion", "Create an academic year first.", true);
-    targetYearId = any.id;
+  if (!activeYear) {
+    await flashTo("/promotion", "Create and activate an academic year first.", true);
+    return;
   }
+  // Keep promoted students in the active academic year so they stay visible in
+  // class lists, reports and marksheets. Changing year is a separate admin action.
+  const targetYearId = activeYear.id;
 
   const [toClassRow] = await db.select().from(classes).where(eq(classes.id, toClass)).limit(1);
   const maxRoll = await db
