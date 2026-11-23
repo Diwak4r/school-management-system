@@ -399,13 +399,13 @@ export async function attendancePct(
 
   if (from) {
     conds.push(
-      sql`${attendance.attDate} >= ${from.toISOString().slice(0, 10)}`,
+      sql`${attendance.attDate} >= ${dateStr(from)}`,
     );
   }
 
   if (to) {
     conds.push(
-      sql`${attendance.attDate} <= ${to.toISOString().slice(0, 10)}`,
+      sql`${attendance.attDate} <= ${dateStr(to)}`,
     );
   }
 
@@ -461,14 +461,21 @@ export function fmtDate(
   });
 }
 
+export function dateStr(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  return dateStr(new Date());
 }
 
 export function addDays(d: Date, n: number): string {
   const c = new Date(d);
   c.setDate(c.getDate() + n);
-  return c.toISOString().slice(0, 10);
+  return dateStr(c);
 }
 
 export async function getSetting(

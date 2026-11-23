@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { students, enrollments, classes, sections, attendance, classSubjects, parentChildren, academicYears } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
 import { flashTo } from "@/actions/auth";
-import { attendancePct, fmtDate, todayStr, addDays, getSchool } from "@/lib/grading";
+import { attendancePct, fmtDate, todayStr, addDays, dateStr, getSchool } from "@/lib/grading";
 import { PageHead, Badge, Donut, Icon, Empty, Field } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -227,7 +227,7 @@ async function Report({ searchParams }: { searchParams: Record<string, string | 
   const fromDate = /^\d{4}-\d{2}-\d{2}$/.test(fromParam)
     ? new Date(`${fromParam}T00:00:00`)
     : new Date(`${addDays(new Date(), -29)}T00:00:00`);
-  const from = fromDate.toISOString().slice(0, 10);
+  const from = dateStr(fromDate);
   const to = todayStr();
   const rows = await Promise.all(
     roster.map(async (r) => {

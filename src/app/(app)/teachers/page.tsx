@@ -4,6 +4,7 @@ import { teachers, classSubjects } from "@/db/schema";
 import { requireRole, logAudit } from "@/lib/auth";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Badge, FormModal, ModalCancel, Field, ConfirmButton, Icon, Empty } from "@/components/ui";
+import { todayStr } from "@/lib/grading";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ export async function saveTeacher(formData: FormData) {
     email: s(formData.get("email")),
     qualification: s(formData.get("qualification")),
     address: s(formData.get("address")),
-    joinDate: s(formData.get("joinDate")) ?? new Date().toISOString().slice(0, 10),
+    joinDate: s(formData.get("joinDate")) ?? todayStr(),
   };
   let tid = id;
   if (id) {
@@ -177,7 +178,7 @@ function TeacherForm({ teacher }: { teacher?: any }) {
         <input name="qualification" defaultValue={teacher?.qualification ?? ""} placeholder="B.Ed, M.Ed…" className="inp" />
       </Field>
       <Field label="Joining date">
-        <input name="joinDate" type="date" defaultValue={teacher?.joinDate ?? new Date().toISOString().slice(0, 10)} className="inp" />
+        <input name="joinDate" type="date" defaultValue={teacher?.joinDate ?? todayStr()} className="inp" />
       </Field>
       <Field label="Address" className="col-span-2">
         <input name="address" defaultValue={teacher?.address ?? ""} className="inp" />

@@ -11,18 +11,7 @@ const SESSION_DAYS = 7;
 
 /* ------------------------------ Password hash ----------------------------- */
 
-export function hashPassword(pw: string): string {
-  const salt = crypto.randomBytes(12).toString("hex");
-  const hash = crypto.scryptSync(pw, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
-}
-
-export function verifyPassword(pw: string, stored: string): boolean {
-  const [salt, hash] = stored.split(":");
-  if (!salt || !hash) return false;
-  const test = crypto.scryptSync(pw, salt, 64).toString("hex");
-  return crypto.timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(test, "hex"));
-}
+export { hashPassword, verifyPassword } from "./password";
 
 /* -------------------------------- Sessions -------------------------------- */
 

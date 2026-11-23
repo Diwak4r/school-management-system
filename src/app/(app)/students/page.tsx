@@ -6,6 +6,7 @@ import { students, enrollments, classes, sections, academicYears, attendance, us
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Badge, FormModal, ModalCancel, Field, ConfirmButton, Icon, Empty } from "@/components/ui";
+import { todayStr } from "@/lib/grading";
 
 export const dynamic = "force-dynamic";
 
@@ -207,7 +208,7 @@ export async function saveStudent(formData: FormData) {
         academicYearId,
         admissionDate:
           s(formData.get("admissionDate")) ??
-          new Date().toISOString().slice(0, 10),
+          todayStr(),
         status: "active",
       });
     }
@@ -470,7 +471,7 @@ export function StudentForm({
         <input name="rollNo" type="number" min="1" defaultValue={rollNo ?? ""} className="inp" />
       </Field>
       <Field label="Admission date">
-        <input name="admissionDate" type="date" defaultValue={student?.admissionDate ?? new Date().toISOString().slice(0, 10)} className="inp" />
+        <input name="admissionDate" type="date" defaultValue={student?.admissionDate ?? todayStr()} className="inp" />
       </Field>
       <Field label="Blood group">
         <select name="bloodGroup" defaultValue={student?.bloodGroup ?? ""} className="inp">

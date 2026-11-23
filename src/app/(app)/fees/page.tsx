@@ -18,6 +18,7 @@ import { PageHead, Badge, Field, Empty } from "@/components/ui";
 import { redirect } from "next/navigation";
 import { feePaymentPool } from "@/lib/fee-payment-pool";
 import { randomUUID } from "node:crypto";
+import { todayStr } from "@/lib/grading";
 
 export const dynamic = "force-dynamic";
 
@@ -140,7 +141,7 @@ export async function createFeeInvoice(formData: FormData) {
     await flashTo("/fees", "The student is not actively enrolled in the selected class and academic year.", true);
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
   if (dueDate < today) {
     await flashTo("/fees", "The due date cannot be in the past.", true);
   }
