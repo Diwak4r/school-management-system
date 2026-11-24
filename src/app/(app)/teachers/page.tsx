@@ -2,6 +2,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { teachers, classSubjects } from "@/db/schema";
 import { requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Badge, FormModal, ModalCancel, Field, ConfirmButton, Icon, Empty } from "@/components/ui";
 import { todayStr } from "@/lib/grading";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 export async function saveTeacher(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = formData.get("id") ? Number(formData.get("id")) : null;
   const name = String(formData.get("name") ?? "").trim();
   const employeeNo = String(formData.get("employeeNo") ?? "").trim();
@@ -19,7 +21,7 @@ export async function saveTeacher(formData: FormData) {
   const dup = await db
     .select({ id: teachers.id })
     .from(teachers)
-    .where(id ? and(eq(teachers.employeeNo, employeeNo), sql`${teachers.id} != ${id}`) : eq(teachers.employeeNo, employeeNo))
+    .where(id ? and(eq(teachers.employeeNo, employeeNo), sql`${teachers.id} != ${id}`, eq(teachers.schoolId, schoolId)) : and(eq(teachers.employeeNo, employeeNo), eq(teachers.schoolId, schoolId)))
     .limit(1);
   if (dup.length > 0) await flashTo("/teachers", `Employee no. ${employeeNo} is already in use.`, true);
 
@@ -36,9 +38,9 @@ export async function saveTeacher(formData: FormData) {
   };
   let tid = id;
   if (id) {
-    await db.update(teachers).set(data).where(eq(teachers.id, id));
+    await db.update(teachers).set(data).where(and(eq(teachers.id, id), eq(teachers.schoolId, schoolId)));
   } else {
-    const [row] = await db.insert(teachers).values(data).returning({ id: teachers.id });
+    const [row] = await db.insert(teachers).values({ ...data, schoolId }).returning({ id: teachers.id });
     tid = row.id;
   }
   await logAudit(user.id, id ? "Updated teacher" : "Added teacher", "teacher", tid ?? undefined, name);
@@ -48,9 +50,10 @@ export async function saveTeacher(formData: FormData) {
 export async function deleteTeacher(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  const [row] = await db.select().from(teachers).where(eq(teachers.id, id)).limit(1);
-  await db.update(teachers).set({ status: "inactive" }).where(eq(teachers.id, id));
+  const [row] = await db.select().from(teachers).where(and(eq(teachers.id, id), eq(teachers.schoolId, schoolId))).limit(1);
+  await db.update(teachers).set({ status: "inactive" }).where(and(eq(teachers.id, id), eq(teachers.schoolId, schoolId)));
   await logAudit(user.id, "Deactivated teacher", "teacher", id, row?.name);
   await flashTo("/teachers", "Teacher deactivated (records preserved).");
 }
@@ -58,8 +61,9 @@ export async function deleteTeacher(formData: FormData) {
 export async function reactivateTeacher(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  await db.update(teachers).set({ status: "active" }).where(eq(teachers.id, id));
+  await db.update(teachers).set({ status: "active" }).where(and(eq(teachers.id, id), eq(teachers.schoolId, schoolId)));
   await logAudit(user.id, "Reactivated teacher", "teacher", id);
   await flashTo("/teachers", "Teacher re-activated.");
 }
@@ -71,12 +75,14 @@ function s(v: FormDataEntryValue | null) {
 
 export default async function TeachersPage() {
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const rows = await db
     .select({
       t: teachers,
-      classesCount: sql<number>`(select count(*) from class_subjects where class_subjects.teacher_id = ${teachers.id})::int`,
+      classesCount: sql<number>`(select count(*) from class_subjects where class_subjects.teacher_id = ${teachers.id} and class_subjects.school_id = ${schoolId})::int`,
     })
     .from(teachers)
+    .where(eq(teachers.schoolId, schoolId))
     .orderBy(teachers.name);
 
   return (

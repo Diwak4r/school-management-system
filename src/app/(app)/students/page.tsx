@@ -2,8 +2,9 @@
 import { redirect } from "next/navigation";
 import { eq, and, sql, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { students, enrollments, classes, sections, academicYears, attendance, users, sessions } from "@/db/schema";
+import { students, enrollments, classes, sections, academicYears, attendance, users, sessions, classSubjects } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Badge, FormModal, ModalCancel, Field, ConfirmButton, Icon, Empty } from "@/components/ui";
 import { todayStr } from "@/lib/grading";
@@ -16,6 +17,7 @@ export async function saveStudent(formData: FormData) {
   "use server";
 
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
 
   const id = formData.get("id")
     ? Number(formData.get("id"))
@@ -35,9 +37,10 @@ export async function saveStudent(formData: FormData) {
       id
         ? and(
             eq(students.admissionNo, admissionNo),
-            sql`${students.id} != ${id}`
+            sql`${students.id} != ${id}`,
+            eq(students.schoolId, schoolId)
           )
-        : eq(students.admissionNo, admissionNo)
+        : and(eq(students.admissionNo, admissionNo), eq(students.schoolId, schoolId))
     )
     .limit(1);
 
@@ -61,7 +64,7 @@ export async function saveStudent(formData: FormData) {
     const [classRow] = await db
       .select()
       .from(classes)
-      .where(eq(classes.id, classId))
+      .where(and(eq(classes.id, classId), eq(classes.schoolId, schoolId)))
       .limit(1);
 
     if (!classRow) {
@@ -71,7 +74,7 @@ export async function saveStudent(formData: FormData) {
     const [year] = await db
       .select()
       .from(academicYears)
-      .where(eq(academicYears.status, "active"))
+      .where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId)))
       .limit(1);
 
     if (!year) {
@@ -92,7 +95,8 @@ export async function saveStudent(formData: FormData) {
         .where(
           and(
             eq(sections.id, sectionId),
-            eq(sections.classId, classId)
+            eq(sections.classId, classId),
+            eq(sections.schoolId, schoolId)
           )
         )
         .limit(1);
@@ -109,6 +113,7 @@ export async function saveStudent(formData: FormData) {
       }
 
       const rollConditions = [
+        eq(enrollments.schoolId, schoolId),
         eq(enrollments.academicYearId, academicYearId),
         eq(enrollments.classId, classId),
         eq(enrollments.rollNo, rollNo),
@@ -166,11 +171,11 @@ export async function saveStudent(formData: FormData) {
   let studentId = id;
 
   if (id !== null) {
-    await db.update(students).set(data).where(eq(students.id, id));
+    await db.update(students).set(data).where(and(eq(students.id, id), eq(students.schoolId, schoolId)));
   } else {
     const [row] = await db
       .insert(students)
-      .values(data)
+      .values({ ...data, schoolId })
       .returning({ id: students.id });
 
     studentId = row.id;
@@ -185,7 +190,8 @@ export async function saveStudent(formData: FormData) {
         and(
           eq(enrollments.studentId, studentId!),
           eq(enrollments.academicYearId, academicYearId),
-          eq(enrollments.status, "active")
+          eq(enrollments.status, "active"),
+          eq(enrollments.schoolId, schoolId)
         )
       )
       .limit(1);
@@ -200,12 +206,13 @@ export async function saveStudent(formData: FormData) {
       await db
         .update(enrollments)
         .set(enrollmentData)
-        .where(eq(enrollments.id, existing[0].id));
+        .where(and(eq(enrollments.id, existing[0].id), eq(enrollments.schoolId, schoolId)));
     } else {
       await db.insert(enrollments).values({
         studentId: studentId!,
         ...enrollmentData,
         academicYearId,
+        schoolId,
         admissionDate:
           s(formData.get("admissionDate")) ??
           todayStr(),
@@ -233,10 +240,11 @@ export async function saveStudent(formData: FormData) {
 export async function deleteStudent(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  const [row] = await db.select().from(students).where(eq(students.id, id)).limit(1);
-  await db.update(students).set({ deletedAt: new Date() }).where(eq(students.id, id));
-  const linkedUsers = await db.select({ userId: users.id }).from(users).where(eq(users.studentId, id));
+  const [row] = await db.select().from(students).where(and(eq(students.id, id), eq(students.schoolId, schoolId))).limit(1);
+  await db.update(students).set({ deletedAt: new Date() }).where(and(eq(students.id, id), eq(students.schoolId, schoolId)));
+  const linkedUsers = await db.select({ userId: users.id }).from(users).where(and(eq(users.studentId, id), eq(users.schoolId, schoolId)));
   if (linkedUsers.length > 0) {
     await db.delete(sessions).where(inArray(sessions.userId, linkedUsers.map((u) => u.userId)));
   }
@@ -257,6 +265,7 @@ function n(v: FormDataEntryValue | null) {
 
 export default async function StudentsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   if (user.role === "student") redirect(`/students/${user.studentId}`);
   if (user.role === "parent") redirect("/dashboard");
   const isAdmin = user.role === "admin";
@@ -269,9 +278,9 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
 
   const [allClasses, allSections, yearRow, base] = await (async () => {
     const [allClasses, allSections, yearRow] = await Promise.all([
-      db.select().from(classes).orderBy(classes.sortOrder),
-      db.select().from(sections),
-      db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1),
+      db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
+      db.select().from(sections).where(eq(sections.schoolId, schoolId)),
+      db.select().from(academicYears).where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId))).limit(1),
     ]);
     const year = yearRow[0]?.id ?? null;
     const base = await db
@@ -284,16 +293,31 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
         rollNo: enrollments.rollNo,
       })
       .from(students)
-      .leftJoin(enrollments, and(eq(enrollments.studentId, students.id), eq(enrollments.status, "active"), eq(enrollments.academicYearId, year)))
-      .leftJoin(classes, eq(classes.id, enrollments.classId))
-      .leftJoin(sections, eq(sections.id, enrollments.sectionId))
-      .where(isNull(students.deletedAt))
+      .leftJoin(enrollments, and(eq(enrollments.studentId, students.id), eq(enrollments.status, "active"), eq(enrollments.academicYearId, year), eq(enrollments.schoolId, schoolId)))
+      .leftJoin(classes, and(eq(classes.id, enrollments.classId), eq(classes.schoolId, schoolId)))
+      .leftJoin(sections, and(eq(sections.id, enrollments.sectionId), eq(sections.schoolId, schoolId)))
+      .where(and(isNull(students.deletedAt), eq(students.schoolId, schoolId)))
       .orderBy(students.name);
     return [allClasses, allSections, yearRow, base];
   })();
   const activeYear = yearRow[0];
 
-  let rows = base.filter((r) => {
+  let visibleBase = base;
+  if (user.role === "teacher" && user.teacherId) {
+    const assigned = await db
+      .select({ classId: classSubjects.classId })
+      .from(classSubjects)
+      .where(
+        and(
+          eq(classSubjects.teacherId, user.teacherId),
+          eq(classSubjects.schoolId, schoolId),
+        ),
+      );
+    const assignedClasses = new Set(assigned.map((row) => row.classId));
+    visibleBase = base.filter((row) => row.classId !== null && assignedClasses.has(row.classId));
+  }
+
+  let rows = visibleBase.filter((r) => {
     if (q && !(r.student.name.toLowerCase().includes(q.toLowerCase()) || r.student.admissionNo.toLowerCase().includes(q.toLowerCase()))) return false;
     if (classId && r.classId !== classId) return false;
     if (sectionId && r.sectionId !== sectionId) return false;
@@ -308,7 +332,7 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
       ? await db
           .select({ studentId: attendance.studentId, status: attendance.status, c: sql<number>`count(*)::int` })
           .from(attendance)
-          .where(inArray(attendance.studentId, ids))
+          .where(and(inArray(attendance.studentId, ids), eq(attendance.schoolId, schoolId)))
           .groupBy(attendance.studentId, attendance.status)
       : [];
   const attMap = new Map<number, { p: number; t: number }>();

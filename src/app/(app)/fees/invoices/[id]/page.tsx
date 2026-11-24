@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { getSchool } from "@/lib/grading";
+import { currentSchoolId } from "@/lib/tenant";
 import PrintButton from "@/components/print-button";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,7 @@ export default async function InvoicePrintPage({
   params: Promise<{ id: string }>;
 }) {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   const { id } = await params;
   const invoiceId = Number(id);
 
@@ -42,7 +44,7 @@ export default async function InvoicePrintPage({
   const [invoice] = await db
     .select()
     .from(feeInvoices)
-    .where(eq(feeInvoices.id, invoiceId))
+    .where(and(eq(feeInvoices.id, invoiceId), eq(feeInvoices.schoolId, schoolId)))
     .limit(1);
 
   if (!invoice) notFound();
@@ -57,6 +59,7 @@ export default async function InvoicePrintPage({
         and(
           eq(parentChildren.userId, user.id),
           eq(parentChildren.studentId, invoice.studentId),
+          eq(parentChildren.schoolId, schoolId),
         ),
       )
       .limit(1);
@@ -69,21 +72,21 @@ export default async function InvoicePrintPage({
   }
 
   const [student, school, year, items, payments] = await Promise.all([
-    db.select().from(students).where(eq(students.id, invoice.studentId)).limit(1),
-    getSchool(),
-    db.select().from(academicYears).where(eq(academicYears.id, invoice.academicYearId)).limit(1),
-    db.select().from(feeInvoiceItems).where(eq(feeInvoiceItems.invoiceId, invoiceId)),
-    db.select().from(feePayments).where(eq(feePayments.invoiceId, invoiceId)),
+    db.select().from(students).where(and(eq(students.id, invoice.studentId), eq(students.schoolId, schoolId))).limit(1),
+    getSchool(schoolId),
+    db.select().from(academicYears).where(and(eq(academicYears.id, invoice.academicYearId), eq(academicYears.schoolId, schoolId))).limit(1),
+    db.select().from(feeInvoiceItems).where(and(eq(feeInvoiceItems.invoiceId, invoiceId), eq(feeInvoiceItems.schoolId, schoolId))),
+    db.select().from(feePayments).where(and(eq(feePayments.invoiceId, invoiceId), eq(feePayments.schoolId, schoolId))),
   ]);
 
   if (!student[0]) notFound();
 
   const enrollment = invoice.enrollmentId
-    ? await db.select().from(enrollments).where(eq(enrollments.id, invoice.enrollmentId)).limit(1)
+    ? await db.select().from(enrollments).where(and(eq(enrollments.id, invoice.enrollmentId), eq(enrollments.schoolId, schoolId))).limit(1)
     : [];
 
   const classRow = enrollment[0]
-    ? await db.select().from(classes).where(eq(classes.id, enrollment[0].classId)).limit(1)
+    ? await db.select().from(classes).where(and(eq(classes.id, enrollment[0].classId), eq(classes.schoolId, schoolId))).limit(1)
     : [];
 
   const paid = payments.reduce((sum, payment) => sum + payment.amountPaisa, 0);

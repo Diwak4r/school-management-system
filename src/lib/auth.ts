@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { users, sessions, auditLogs, students } from "@/db/schema";
+import { users, sessions, auditLogs, students, schools } from "@/db/schema";
 
 const COOKIE = "sms_session";
 const SESSION_DAYS = 7;
@@ -43,6 +43,7 @@ export async function getSessionUser() {
   const rows = await db
     .select({
       id: users.id,
+      schoolId: users.schoolId,
       name: users.name,
       email: users.email,
       role: users.role,
@@ -53,8 +54,16 @@ export async function getSessionUser() {
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
+    .innerJoin(schools, eq(schools.id, users.schoolId))
     .leftJoin(students, eq(students.id, users.studentId))
-    .where(and(eq(sessions.token, token), or(isNull(users.studentId), isNull(students.deletedAt))))
+    .where(
+      and(
+        eq(sessions.token, token),
+        eq(users.isActive, true),
+        eq(schools.status, "active"),
+        or(isNull(users.studentId), isNull(students.deletedAt)),
+      ),
+    )
     .limit(1);
   const row = rows[0];
   if (!row) return null;
@@ -64,6 +73,7 @@ export async function getSessionUser() {
   }
   return {
     id: row.id,
+    schoolId: row.schoolId,
     name: row.name,
     email: row.email,
     role: row.role,
@@ -105,9 +115,18 @@ export async function logAudit(
   details?: string,
 ) {
   try {
+    let schoolId = 1;
+    if (userId) {
+      const [u] = await db
+        .select({ schoolId: users.schoolId })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      schoolId = u?.schoolId ?? 1;
+    }
     await db
       .insert(auditLogs)
-      .values({ userId, action, entity: entity ?? null, entityId: entityId ? String(entityId) : null, details: details ?? null });
+      .values({ schoolId, userId, action, entity: entity ?? null, entityId: entityId ? String(entityId) : null, details: details ?? null });
   } catch {
     /* audit must never break the flow */
   }

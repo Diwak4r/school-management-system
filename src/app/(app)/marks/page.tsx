@@ -3,6 +3,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { examinations, examSubjects, classes, subjects, students, enrollments, classSubjects, marks, academicYears } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { fmtDate } from "@/lib/grading";
 import { PageHead, Badge, Icon, Empty, Field } from "@/components/ui";
@@ -17,6 +18,7 @@ export async function submitMarks(formData: FormData) {
   "use server";
   const user = await requireUser();
   if (user.role === "student" || user.role === "parent") await flashTo("/dashboard", "Not permitted.", true);
+  const schoolId = await currentSchoolId();
 
   const examSubjectId = Number(formData.get("examSubjectId"));
 
@@ -24,7 +26,7 @@ export async function submitMarks(formData: FormData) {
     .select({ e: examinations, exam: examSubjects })
     .from(examSubjects)
     .innerJoin(examinations, eq(examinations.id, examSubjects.examId))
-    .where(eq(examSubjects.id, examSubjectId))
+    .where(and(eq(examSubjects.id, examSubjectId), eq(examSubjects.schoolId, schoolId)))
     .limit(1);
 
   if (!sub) await flashTo("/marks", "Select a subject first.", true);
@@ -35,18 +37,18 @@ export async function submitMarks(formData: FormData) {
     const [a] = await db
       .select()
       .from(classSubjects)
-      .where(and(eq(classSubjects.classId, sub.exam.classId), eq(classSubjects.subjectId, sub.exam.subjectId), eq(classSubjects.teacherId, user.teacherId!)))
+      .where(and(eq(classSubjects.classId, sub.exam.classId), eq(classSubjects.subjectId, sub.exam.subjectId), eq(classSubjects.teacherId, user.teacherId!), eq(classSubjects.schoolId, schoolId)))
       .limit(1);
 
     if (!a) await flashTo("/marks", "You are not assigned to this class & subject.", true);
   }
 
   const allowedRows = sub.exam.classId === 0
-    ? await db.select({ studentId: enrollments.studentId }).from(enrollments).where(eq(enrollments.status, "active"))
+    ? await db.select({ studentId: enrollments.studentId }).from(enrollments).where(and(eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)))
     : await db
         .select({ studentId: enrollments.studentId })
         .from(enrollments)
-        .where(and(eq(enrollments.classId, sub.exam.classId), eq(enrollments.status, "active")));
+        .where(and(eq(enrollments.classId, sub.exam.classId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)));
   const allowedStudentIds = new Set(allowedRows.map((r) => r.studentId));
 
   const theoryFull = sub.exam.fullMarks - sub.exam.practicalMarks;
@@ -83,7 +85,7 @@ export async function submitMarks(formData: FormData) {
 
     await db
       .insert(marks)
-      .values({ examSubjectId, studentId, theory: t, practical: p })
+      .values({ examSubjectId, studentId, theory: t, practical: p, schoolId })
       .onConflictDoUpdate({
         target: [marks.examSubjectId, marks.studentId],
         set: { theory: t, practical: p }
@@ -97,7 +99,7 @@ export async function submitMarks(formData: FormData) {
     return;
   }
 
-  const [examRow] = await db.select().from(examinations).where(eq(examinations.id, sub.e.id)).limit(1);
+  const [examRow] = await db.select().from(examinations).where(and(eq(examinations.id, sub.e.id), eq(examinations.schoolId, schoolId))).limit(1);
 
   await logAudit(user.id, "Entered marks", "marks", examSubjectId, `${saved} student(s) — ${examRow?.name}`);
 
@@ -108,6 +110,7 @@ export async function submitMarks(formData: FormData) {
 
 export default async function MarksPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
 
   if (user.role === "student" || user.role === "parent") {
     return (
@@ -133,7 +136,7 @@ export default async function MarksPage({ searchParams }: { searchParams: Promis
     })
     .from(examinations)
     .innerJoin(academicYears, eq(academicYears.id, examinations.academicYearId))
-    .where(sql`${examinations.status} != 'published'`)
+    .where(and(sql`${examinations.status} != 'published'`, eq(examinations.schoolId, schoolId)))
     .orderBy(examinations.id);
 
   const examId = sp.exam ? Number(sp.exam) : exams[0]?.id ?? null;
@@ -168,7 +171,7 @@ export default async function MarksPage({ searchParams }: { searchParams: Promis
       .from(examSubjects)
       .innerJoin(classes, eq(classes.id, examSubjects.classId))
       .innerJoin(subjects, eq(subjects.id, examSubjects.subjectId))
-      .where(eq(examSubjects.examId, activeExam.id))
+      .where(and(eq(examSubjects.examId, activeExam.id), eq(examSubjects.schoolId, schoolId)))
       .orderBy(classes.sortOrder, subjects.name);
 
     if (isAdmin) {
@@ -184,7 +187,7 @@ export default async function MarksPage({ searchParams }: { searchParams: Promis
         passMarks: b.passMarks
       }));
     } else {
-      const assigned = await db.select().from(classSubjects).where(eq(classSubjects.teacherId, user.teacherId!));
+      const assigned = await db.select().from(classSubjects).where(and(eq(classSubjects.teacherId, user.teacherId!), eq(classSubjects.schoolId, schoolId)));
       const key = new Set(assigned.map((a) => `${a.classId}:${a.subjectId}`));
 
       subRows = base
@@ -211,14 +214,14 @@ export default async function MarksPage({ searchParams }: { searchParams: Promis
   let existing: Record<number, { theory: number; practical: number }> = {};
 
   if (selSub && activeExam) {
-    const [cRow] = await db.select().from(examSubjects).where(eq(examSubjects.id, selSub.id)).limit(1);
+    const [cRow] = await db.select().from(examSubjects).where(and(eq(examSubjects.id, selSub.id), eq(examSubjects.schoolId, schoolId))).limit(1);
 
     if (cRow) {
       roster = await db
         .select({ student: students, rollNo: enrollments.rollNo })
         .from(enrollments)
         .innerJoin(students, eq(students.id, enrollments.studentId))
-        .where(and(eq(enrollments.classId, cRow.classId), eq(enrollments.status, "active")))
+        .where(and(eq(enrollments.classId, cRow.classId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)))
         .orderBy(enrollments.rollNo);
 
       const m = await db
@@ -228,7 +231,7 @@ export default async function MarksPage({ searchParams }: { searchParams: Promis
           practical: marks.practical
         })
         .from(marks)
-        .where(eq(marks.examSubjectId, selSub.id));
+        .where(and(eq(marks.examSubjectId, selSub.id), eq(marks.schoolId, schoolId)));
 
       existing = Object.fromEntries(m.map((x) => [
         x.studentId,

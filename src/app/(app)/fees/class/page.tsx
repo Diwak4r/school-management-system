@@ -11,6 +11,7 @@ import {
   students,
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 
 function formatNPR(paisa: number) {
   return new Intl.NumberFormat("en-NP", {
@@ -27,6 +28,7 @@ export default async function ClassFeeStatusPage() {
   if (user.role !== "teacher" || !user.teacherId) {
     redirect("/dashboard");
   }
+  const schoolId = await currentSchoolId();
 
   // Only classes where this teacher is officially the class teacher.
   const assignedClasses = await db
@@ -35,11 +37,12 @@ export default async function ClassFeeStatusPage() {
       className: classes.name,
     })
     .from(classSubjects)
-    .innerJoin(classes, eq(classes.id, classSubjects.classId))
+    .innerJoin(classes, and(eq(classes.id, classSubjects.classId), eq(classes.schoolId, schoolId)))
     .where(
       and(
         eq(classSubjects.teacherId, user.teacherId),
         eq(classSubjects.isClassTeacher, true),
+        eq(classSubjects.schoolId, schoolId),
       ),
     );
 
@@ -77,13 +80,14 @@ export default async function ClassFeeStatusPage() {
       rollNo: enrollments.rollNo,
     })
     .from(enrollments)
-    .innerJoin(students, eq(students.id, enrollments.studentId))
-    .innerJoin(classes, eq(classes.id, enrollments.classId))
-    .innerJoin(academicYears, eq(academicYears.id, enrollments.academicYearId))
+    .innerJoin(students, and(eq(students.id, enrollments.studentId), eq(students.schoolId, schoolId)))
+    .innerJoin(classes, and(eq(classes.id, enrollments.classId), eq(classes.schoolId, schoolId)))
+    .innerJoin(academicYears, and(eq(academicYears.id, enrollments.academicYearId), eq(academicYears.schoolId, schoolId)))
     .where(
       and(
         inArray(enrollments.classId, classIds),
         eq(enrollments.status, "active"),
+        eq(enrollments.schoolId, schoolId),
       ),
     );
 
@@ -105,6 +109,7 @@ export default async function ClassFeeStatusPage() {
             and(
               inArray(feeInvoices.studentId, studentIds),
               inArray(feeInvoices.academicYearId, yearIds),
+              eq(feeInvoices.schoolId, schoolId),
             ),
           )
       : [];
@@ -119,7 +124,7 @@ export default async function ClassFeeStatusPage() {
             amountPaisa: feePayments.amountPaisa,
           })
           .from(feePayments)
-          .where(inArray(feePayments.invoiceId, invoiceIds))
+          .where(and(inArray(feePayments.invoiceId, invoiceIds), eq(feePayments.schoolId, schoolId)))
       : [];
 
   const paidByInvoice = new Map<number, number>();

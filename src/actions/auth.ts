@@ -20,7 +20,7 @@ export async function login(formData: FormData) {
 
   const rows = await db.select().from(users).where(eq(users.email, email)).limit(1);
   const user = rows[0];
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  if (!user || !user.isActive || !verifyPassword(password, user.passwordHash)) {
     redirect("/login?err=Invalid email or password. Please try again.");
   }
   if (user.studentId) {

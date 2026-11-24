@@ -21,6 +21,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { attendancePct, computeClassResults, fmtDate, todayStr, addDays, getScale } from "@/lib/grading";
+import { currentSchoolId } from "@/lib/tenant";
 import { Stat, Donut, Badge, Icon, Empty, PageHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +39,8 @@ export default async function DashboardPage() {
 /* --------------------------------- ADMIN ---------------------------------- */
 
 async function AdminDash({ today }: { today: string }) {
-  const [activeYear] = await db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1);
+  const schoolId = await currentSchoolId();
+  const [activeYear] = await db.select().from(academicYears).where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId))).limit(1);
   const [
     studentCount,
     teacherCount,
@@ -50,24 +52,24 @@ async function AdminDash({ today }: { today: string }) {
     last7,
     scale,
   ] = await Promise.all([
-    db.select({ c: sql<number>`count(*)::int` }).from(students).where(sql`${students.deletedAt} is null`),
-    db.select({ c: sql<number>`count(*)::int` }).from(teachers).where(eq(teachers.status, "active")),
-    db.select({ c: sql<number>`count(*)::int` }).from(classes),
+    db.select({ c: sql<number>`count(*)::int` }).from(students).where(and(sql`${students.deletedAt} is null`, eq(students.schoolId, schoolId))),
+    db.select({ c: sql<number>`count(*)::int` }).from(teachers).where(and(eq(teachers.status, "active"), eq(teachers.schoolId, schoolId))),
+    db.select({ c: sql<number>`count(*)::int` }).from(classes).where(eq(classes.schoolId, schoolId)),
     db
       .select({ status: attendance.status, c: sql<number>`count(*)::int` })
       .from(attendance)
-      .where(eq(attendance.attDate, today))
+      .where(and(eq(attendance.attDate, today), eq(attendance.schoolId, schoolId)))
       .groupBy(attendance.status),
     db
       .select()
       .from(examinations)
-      .where(and(eq(examinations.status, "scheduled"), sql`${examinations.startDate} >= ${today}`))
+      .where(and(eq(examinations.status, "scheduled"), sql`${examinations.startDate} >= ${today}`, eq(examinations.schoolId, schoolId)))
       .orderBy(examinations.startDate)
       .limit(4),
-    db.select().from(notices).orderBy(desc(notices.createdAt)).limit(4),
-    db.select({ action: auditLogs.action, entity: auditLogs.entity, user: users.name, at: auditLogs.createdAt }).from(auditLogs).leftJoin(users, eq(users.id, auditLogs.userId)).orderBy(desc(auditLogs.createdAt)).limit(6),
-    db.select().from(examinations).where(sql`${examinations.endDate} <= ${today} and ${examinations.status} != 'published'`).orderBy(desc(examinations.endDate)).limit(3),
-    getScale(),
+    db.select().from(notices).where(eq(notices.schoolId, schoolId)).orderBy(desc(notices.createdAt)).limit(4),
+    db.select({ action: auditLogs.action, entity: auditLogs.entity, user: users.name, at: auditLogs.createdAt }).from(auditLogs).leftJoin(users, and(eq(users.id, auditLogs.userId), eq(users.schoolId, schoolId))).where(eq(auditLogs.schoolId, schoolId)).orderBy(desc(auditLogs.createdAt)).limit(6),
+    db.select().from(examinations).where(and(sql`${examinations.endDate} <= ${today} and ${examinations.status} != 'published'`, eq(examinations.schoolId, schoolId))).orderBy(desc(examinations.endDate)).limit(3),
+    getScale(schoolId),
   ]);
 
   const present = (todayAtt.find((r) => r.status === "P")?.c ?? 0) + (todayAtt.find((r) => r.status === "L")?.c ?? 0);
@@ -78,16 +80,16 @@ async function AdminDash({ today }: { today: string }) {
   const latestPublished = await db
     .select()
     .from(examinations)
-    .where(and(eq(examinations.status, "published"), activeYear ? eq(examinations.academicYearId, activeYear.id) : sql`true`))
+    .where(and(eq(examinations.status, "published"), eq(examinations.schoolId, schoolId), activeYear ? eq(examinations.academicYearId, activeYear.id) : sql`true`))
     .orderBy(desc(examinations.endDate))
     .limit(1);
 
   let latestSummary: { cls: string; pct: number; gpa: number; count: number }[] = [];
   if (latestPublished[0]) {
-    const clsList = await db.select().from(classes).orderBy(classes.sortOrder);
+    const clsList = await db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder);
     const rows: { cls: string; pct: number; gpa: number; count: number }[] = [];
     for (const c of clsList.slice(-6)) {
-      const res = await computeClassResults(latestPublished[0].id, c.id, scale);
+      const res = await computeClassResults(latestPublished[0].id, c.id, scale, schoolId);
       const done = res.filter((r) => r.totalObtained != null);
       if (done.length > 0) {
         rows.push({
@@ -261,35 +263,36 @@ async function AdminDash({ today }: { today: string }) {
 /* -------------------------------- TEACHER --------------------------------- */
 
 async function TeacherDash({ today, teacherId, userName }: { today: string; teacherId: number; userName: string }) {
+  const schoolId = await currentSchoolId();
   const assignments = await db
     .select({
       className: classes.name,
       subjectName: subjects.name,
       isClassTeacher: classSubjects.isClassTeacher,
-      sectionCount: sql<number>`(select count(*) from sections where sections.class_id = ${classes.id})::int`,
+      sectionCount: sql<number>`(select count(*) from sections where sections.class_id = ${classes.id} and sections.school_id = ${schoolId})::int`,
     })
     .from(classSubjects)
-    .innerJoin(classes, eq(classes.id, classSubjects.classId))
-    .innerJoin(subjects, eq(subjects.id, classSubjects.subjectId))
-    .where(eq(classSubjects.teacherId, teacherId))
+    .innerJoin(classes, and(eq(classes.id, classSubjects.classId), eq(classes.schoolId, schoolId)))
+    .innerJoin(subjects, and(eq(subjects.id, classSubjects.subjectId), eq(subjects.schoolId, schoolId)))
+    .where(and(eq(classSubjects.teacherId, teacherId), eq(classSubjects.schoolId, schoolId)))
     .orderBy(classes.sortOrder);
 
   const [pendingMarks, teacherNotes, noticesList, sectionsMine, todayDone] = await Promise.all([
     db
       .select({ examId: examSubjects.examId, examName: examinations.name, c: sql<number>`count(*)::int` })
       .from(examSubjects)
-      .innerJoin(examinations, eq(examinations.id, examSubjects.examId))
-      .where(and(eq(examinations.status, "completed"), sql`${examSubjects.id} not in (select m.exam_subject_id from marks m)`))
+      .innerJoin(examinations, and(eq(examinations.id, examSubjects.examId), eq(examinations.schoolId, schoolId)))
+      .where(and(eq(examinations.status, "completed"), eq(examSubjects.schoolId, schoolId), sql`${examSubjects.id} not in (select m.exam_subject_id from marks m where m.school_id = ${schoolId})`))
       .groupBy(examSubjects.examId, examinations.name)
       .limit(3),
-    db.select().from(notes).where(eq(notes.uploadedById, teacherId)).orderBy(desc(notes.createdAt)).limit(4),
-    db.select().from(notices).orderBy(desc(notices.createdAt)).limit(4),
+    db.select().from(notes).where(and(eq(notes.uploadedById, teacherId), eq(notes.schoolId, schoolId))).orderBy(desc(notes.createdAt)).limit(4),
+    db.select().from(notices).where(eq(notices.schoolId, schoolId)).orderBy(desc(notices.createdAt)).limit(4),
     db
       .select({ section: sections.name, className: classes.name })
       .from(sections)
-      .innerJoin(classes, eq(classes.id, sections.classId))
-      .where(sql`${sections.classId} in (select class_id from class_subjects where teacher_id = ${teacherId})`),
-    db.select({ c: sql<number>`count(*)::int` }).from(attendance).where(and(eq(attendance.markedById, teacherId), eq(attendance.attDate, today))),
+      .innerJoin(classes, and(eq(classes.id, sections.classId), eq(classes.schoolId, schoolId)))
+      .where(and(eq(sections.schoolId, schoolId), sql`${sections.classId} in (select class_id from class_subjects where teacher_id = ${teacherId} and school_id = ${schoolId})`)),
+    db.select({ c: sql<number>`count(*)::int` }).from(attendance).where(and(eq(attendance.markedById, teacherId), eq(attendance.attDate, today), eq(attendance.schoolId, schoolId))),
   ]);
 
   const firstLast = userName.split(" ");
@@ -352,45 +355,46 @@ async function TeacherDash({ today, teacherId, userName }: { today: string; teac
 /* -------------------------------- STUDENT --------------------------------- */
 
 async function StudentDash({ studentId, userName, today }: { studentId: number; userName: string; today: string }) {
+  const schoolId = await currentSchoolId();
   const [student, enrollee, upExams, studentNotices, classNotes] = await Promise.all([
-    db.select().from(students).where(eq(students.id, studentId)).limit(1),
+    db.select().from(students).where(and(eq(students.id, studentId), eq(students.schoolId, schoolId))).limit(1),
     db
       .select({ className: classes.name, section: sections.name, rollNo: enrollments.rollNo, year: sql<string>`academic_years.name`, classId: classes.id })
       .from(enrollments)
-      .innerJoin(classes, eq(classes.id, enrollments.classId))
-      .innerJoin(sections, eq(sections.id, enrollments.sectionId))
-      .innerJoin(academicYears, eq(academicYears.id, enrollments.academicYearId))
-      .where(and(eq(enrollments.studentId, studentId), eq(enrollments.status, "active")))
+      .innerJoin(classes, and(eq(classes.id, enrollments.classId), eq(classes.schoolId, schoolId)))
+      .innerJoin(sections, and(eq(sections.id, enrollments.sectionId), eq(sections.schoolId, schoolId)))
+      .innerJoin(academicYears, and(eq(academicYears.id, enrollments.academicYearId), eq(academicYears.schoolId, schoolId)))
+      .where(and(eq(enrollments.studentId, studentId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)))
       .limit(1),
-    db.select().from(examinations).where(and(eq(examinations.status, "scheduled"), sql`${examinations.startDate} >= ${today}`)).orderBy(examinations.startDate).limit(3),
+    db.select().from(examinations).where(and(eq(examinations.status, "scheduled"), sql`${examinations.startDate} >= ${today}`, eq(examinations.schoolId, schoolId))).orderBy(examinations.startDate).limit(3),
     db
       .select()
       .from(notices)
-      .where(sql`${notices.classId} is null or ${notices.classId} in (select class_id from enrollments where student_id = ${studentId} and status = 'active')`)
+      .where(and(eq(notices.schoolId, schoolId), sql`${notices.classId} is null or ${notices.classId} in (select class_id from enrollments where student_id = ${studentId} and school_id = ${schoolId} and status = 'active')`))
       .orderBy(desc(notices.createdAt))
       .limit(4),
     db
       .select()
       .from(notes)
-      .where(sql`${notes.classId} in (select class_id from enrollments where student_id = ${studentId} and status = 'active')`)
+      .where(and(eq(notes.schoolId, schoolId), sql`${notes.classId} in (select class_id from enrollments where student_id = ${studentId} and school_id = ${schoolId} and status = 'active')`))
       .orderBy(desc(notes.createdAt))
       .limit(4),
   ]);
 
   const s = student[0];
   const e = enrollee[0];
-  const att = await attendancePct(studentId);
+  const att = await attendancePct(studentId, undefined, undefined, schoolId);
   const [latestExam] = await db
     .select({ name: examinations.name, id: examinations.id, endDate: examinations.endDate })
     .from(examinations)
-    .where(and(eq(examinations.status, "published"), sql`${examinations.id} in (select exam_id from exam_subjects where class_id = ${e?.classId ?? 0})`))
+    .where(and(eq(examinations.status, "published"), eq(examinations.schoolId, schoolId), sql`${examinations.id} in (select exam_id from exam_subjects where class_id = ${e?.classId ?? 0} and school_id = ${schoolId})`))
     .orderBy(desc(examinations.endDate))
     .limit(1);
 
   let gpaDisplay = "—";
   if (latestExam && e) {
-    const scale = await getScale();
-    const res = await computeClassResults(latestExam.id, e.classId, scale);
+    const scale = await getScale(schoolId);
+    const res = await computeClassResults(latestExam.id, e.classId, scale, schoolId);
     const mine = res.find((r) => r.studentId === studentId);
     if (mine && mine.gpa != null) gpaDisplay = mine.gpaDisplay;
   }
@@ -473,13 +477,14 @@ async function StudentDash({ studentId, userName, today }: { studentId: number; 
 /* --------------------------------- PARENT --------------------------------- */
 
 async function ParentDash({ userId, userName, today }: { userId: number; userName: string; today: string }) {
+  const schoolId = await currentSchoolId();
   const children = await db
     .select({ id: students.id, name: students.name, admissionNo: students.admissionNo })
     .from(parentChildren)
-    .innerJoin(students, eq(students.id, parentChildren.studentId))
-    .where(eq(parentChildren.userId, userId));
+    .innerJoin(students, and(eq(students.id, parentChildren.studentId), eq(students.schoolId, schoolId)))
+    .where(and(eq(parentChildren.userId, userId), eq(parentChildren.schoolId, schoolId)));
 
-  const parentNotices = await db.select().from(notices).where(sql`${notices.classId} is null`).orderBy(desc(notices.createdAt)).limit(5);
+  const parentNotices = await db.select().from(notices).where(and(eq(notices.schoolId, schoolId), sql`${notices.classId} is null`)).orderBy(desc(notices.createdAt)).limit(5);
 
   return (
     <>
@@ -518,24 +523,25 @@ async function ParentDash({ userId, userName, today }: { userId: number; userNam
 }
 
 async function ParentChildCard({ childId, name, admissionNo, today }: { childId: number; name: string; admissionNo: string; today: string }) {
+  const schoolId = await currentSchoolId();
   const [e] = await db
     .select({ className: classes.name, section: sections.name, rollNo: enrollments.rollNo, classId: classes.id })
     .from(enrollments)
-    .innerJoin(classes, eq(classes.id, enrollments.classId))
-    .innerJoin(sections, eq(sections.id, enrollments.sectionId))
-    .where(and(eq(enrollments.studentId, childId), eq(enrollments.status, "active")))
+    .innerJoin(classes, and(eq(classes.id, enrollments.classId), eq(classes.schoolId, schoolId)))
+    .innerJoin(sections, and(eq(sections.id, enrollments.sectionId), eq(sections.schoolId, schoolId)))
+    .where(and(eq(enrollments.studentId, childId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)))
     .limit(1);
-  const att = await attendancePct(childId);
+  const att = await attendancePct(childId, undefined, undefined, schoolId);
   const [exam] = await db
     .select({ name: examinations.name, id: examinations.id, endDate: examinations.endDate })
     .from(examinations)
-    .where(and(eq(examinations.status, "published"), sql`${examinations.id} in (select exam_id from exam_subjects where class_id = ${e?.classId ?? 0})`))
+    .where(and(eq(examinations.status, "published"), eq(examinations.schoolId, schoolId), sql`${examinations.id} in (select exam_id from exam_subjects where class_id = ${e?.classId ?? 0} and school_id = ${schoolId})`))
     .orderBy(desc(examinations.endDate))
     .limit(1);
   let gpa = "—";
   if (exam && e) {
-    const scale = await getScale();
-    const res = await computeClassResults(exam.id, e.classId, scale);
+    const scale = await getScale(schoolId);
+    const res = await computeClassResults(exam.id, e.classId, scale, schoolId);
     const mine = res.find((r) => r.studentId === childId);
     if (mine?.gpa != null) gpa = mine.gpaDisplay;
   }

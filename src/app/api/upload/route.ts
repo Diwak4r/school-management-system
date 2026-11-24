@@ -4,8 +4,9 @@ import { and, eq } from "drizzle-orm";
 import { promises as fs } from "fs";
 import path from "path";
 import { db } from "@/db";
-import { notes, academicYears, classes, sections, subjects, classSubjects } from "@/db/schema";
+import { notes, academicYears, classes, sections, subjects, classSubjects, teachers } from "@/db/schema";
 import { getSessionUser, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,8 @@ export async function POST(req: Request) {
       }
     );
   }
+
+  const schoolId = await currentSchoolId();
 
   const fd = await req.formData();
   const file = fd.get("file");
@@ -102,18 +105,20 @@ export async function POST(req: Request) {
   }
 
   if (classId) {
-    const [classRow] = await db.select({ id: classes.id }).from(classes).where(eq(classes.id, classId)).limit(1);
+    const [classRow] = await db.select({ id: classes.id }).from(classes)
+      .where(and(eq(classes.id, classId), eq(classes.schoolId, schoolId))).limit(1);
     if (!classRow) return NextResponse.json({ error: "Selected class does not exist." }, { status: 400 });
   }
 
   if (sectionId) {
     const [sectionRow] = await db.select({ id: sections.id }).from(sections)
-      .where(and(eq(sections.id, sectionId), eq(sections.classId, classId!))).limit(1);
+      .where(and(eq(sections.id, sectionId), eq(sections.classId, classId!), eq(sections.schoolId, schoolId))).limit(1);
     if (!sectionRow) return NextResponse.json({ error: "Selected section does not belong to that class." }, { status: 400 });
   }
 
   if (subjectId) {
-    const [subjectRow] = await db.select({ id: subjects.id }).from(subjects).where(eq(subjects.id, subjectId)).limit(1);
+    const [subjectRow] = await db.select({ id: subjects.id }).from(subjects)
+      .where(and(eq(subjects.id, subjectId), eq(subjects.schoolId, schoolId))).limit(1);
     if (!subjectRow) return NextResponse.json({ error: "Selected subject does not exist." }, { status: 400 });
   }
 
@@ -121,9 +126,15 @@ export async function POST(req: Request) {
     if (!user.teacherId || !classId) {
       return NextResponse.json({ error: "Select one of your assigned classes." }, { status: 403 });
     }
+    const [teacherRow] = await db.select({ id: teachers.id }).from(teachers)
+      .where(and(eq(teachers.id, user.teacherId), eq(teachers.schoolId, schoolId))).limit(1);
+    if (!teacherRow) {
+      return NextResponse.json({ error: "Your account does not belong to this school." }, { status: 403 });
+    }
     const assignmentConditions = [
       eq(classSubjects.teacherId, user.teacherId),
       eq(classSubjects.classId, classId),
+      eq(classSubjects.schoolId, schoolId),
     ];
     if (subjectId) assignmentConditions.push(eq(classSubjects.subjectId, subjectId));
     const [assignment] = await db.select({ id: classSubjects.id }).from(classSubjects)
@@ -136,7 +147,7 @@ export async function POST(req: Request) {
   const [year] = await db
     .select()
     .from(academicYears)
-    .where(eq(academicYears.status, "active"))
+    .where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId)))
     .limit(1);
 
   const dir = path.join(process.cwd(), "public", "uploads");
@@ -152,6 +163,7 @@ export async function POST(req: Request) {
     [row] = await db
       .insert(notes)
     .values({
+      schoolId,
       title,
       classId,
       sectionId,

@@ -2,6 +2,7 @@ import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { users, students } from "@/db/schema";
 import { requireUser, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo, changePassword, logout } from "@/actions/auth";
 import { fmtDate } from "@/lib/grading";
 import { PageHead, Badge, Field, Icon } from "@/components/ui";
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 export async function saveMyProfile(formData: FormData) {
   "use server";
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   if (user.role === "student") {
     const studentId = user.studentId!;
     await db
@@ -20,7 +22,7 @@ export async function saveMyProfile(formData: FormData) {
         address: s(formData.get("address")),
         email: s(formData.get("email")),
       })
-      .where(eq(students.id, studentId));
+      .where(and(eq(students.id, studentId), eq(students.schoolId, schoolId)));
     await logAudit(user.id, "Updated own profile", "student", studentId);
     await flashTo("/profile", "Profile updated.");
   } else {
@@ -30,7 +32,7 @@ export async function saveMyProfile(formData: FormData) {
       const duplicate = await db
         .select({ id: users.id })
         .from(users)
-        .where(and(eq(users.email, email), ne(users.id, user.id)))
+        .where(and(eq(users.email, email), ne(users.id, user.id), eq(users.schoolId, schoolId)))
         .limit(1);
       if (duplicate.length > 0) {
         await flashTo("/profile", "That email address is already in use.", true);
@@ -40,7 +42,7 @@ export async function saveMyProfile(formData: FormData) {
     await db
       .update(users)
       .set({ email })
-      .where(eq(users.id, user.id));
+      .where(and(eq(users.id, user.id), eq(users.schoolId, schoolId)));
     await logAudit(user.id, "Updated own profile", "user", user.id);
     await flashTo("/profile", "Profile updated.");
   }
@@ -60,10 +62,11 @@ const roleLabel: Record<string, string> = {
 
 export default async function ProfilePage() {
   const user = await requireUser();
-  const [me] = await db.select().from(users).where(eq(users.id, user.id)).limit(1);
+  const schoolId = await currentSchoolId();
+  const [me] = await db.select().from(users).where(and(eq(users.id, user.id), eq(users.schoolId, schoolId))).limit(1);
   let student: any = null;
   if (user.role === "student") {
-    [student] = await db.select().from(students).where(eq(students.id, user.studentId!)).limit(1);
+    [student] = await db.select().from(students).where(and(eq(students.id, user.studentId!), eq(students.schoolId, schoolId))).limit(1);
   }
 
   return (

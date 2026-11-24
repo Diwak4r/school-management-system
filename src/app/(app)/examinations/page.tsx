@@ -2,6 +2,7 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { examinations, examSubjects, academicYears, classes, sections, subjects, classSubjects, teachers, enrollments, parentChildren } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { fmtDate, todayStr, addDays } from "@/lib/grading";
 import { PageHead, Badge, FormModal, ModalCancel, Field, ConfirmButton, Icon, Empty } from "@/components/ui";
@@ -15,6 +16,7 @@ const EXAM_TYPES = ["First Terminal Examination", "Second Terminal Examination",
 export async function saveExam(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = formData.get("id") ? Number(formData.get("id")) : null;
   const name = String(formData.get("name") ?? "").trim();
   const examType = String(formData.get("examType") ?? "Unit Test");
@@ -25,11 +27,11 @@ export async function saveExam(formData: FormData) {
   if (!name) await flashTo("/examinations", "Examination name is required.", true);
   if (!academicYearId) await flashTo("/examinations", "Select an academic year.", true);
   if (id) {
-    await db.update(examinations).set({ name, examType, academicYearId, startDate, endDate, status }).where(eq(examinations.id, id));
+    await db.update(examinations).set({ name, examType, academicYearId, startDate, endDate, status }).where(and(eq(examinations.id, id), eq(examinations.schoolId, schoolId)));
     await logAudit(user.id, "Updated examination", "exam", id, name);
     await flashTo("/examinations", "Examination updated.");
   } else {
-    const [row] = await db.insert(examinations).values({ name, examType, academicYearId, startDate, endDate, status }).returning({ id: examinations.id });
+    const [row] = await db.insert(examinations).values({ name, examType, academicYearId, startDate, endDate, status, schoolId }).returning({ id: examinations.id });
     await logAudit(user.id, "Created examination", "exam", row.id, name);
     await flashTo(`/examinations?exam=${row.id}`, `${name} created. Now configure subjects and full marks.`);
   }
@@ -38,9 +40,10 @@ export async function saveExam(formData: FormData) {
 export async function deleteExam(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  const [row] = await db.select().from(examinations).where(eq(examinations.id, id)).limit(1);
-  await db.delete(examinations).where(eq(examinations.id, id));
+  const [row] = await db.select().from(examinations).where(and(eq(examinations.id, id), eq(examinations.schoolId, schoolId))).limit(1);
+  await db.delete(examinations).where(and(eq(examinations.id, id), eq(examinations.schoolId, schoolId)));
   await logAudit(user.id, "Deleted examination", "exam", id, row?.name);
   await flashTo("/examinations", "Examination deleted along with its subject configuration.");
 }
@@ -48,6 +51,7 @@ export async function deleteExam(formData: FormData) {
 export async function saveExamSubject(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const examId = Number(formData.get("examId"));
   const classId = Number(formData.get("classId"));
   const subjectId = Number(formData.get("subjectId"));
@@ -56,11 +60,11 @@ export async function saveExamSubject(formData: FormData) {
   const passMarks = Number(formData.get("passMarks") ?? 40);
   if (!examId || !classId || !subjectId) await flashTo("/examinations", "Complete the subject form.", true);
   if (practicalMarks >= fullMarks || practicalMarks < 0 || fullMarks <= 0) await flashTo("/examinations", "Full marks must be positive and practical marks must be less than full marks.", true);
-  const existing = await db.select().from(examSubjects).where(and(eq(examSubjects.examId, examId), eq(examSubjects.classId, classId), eq(examSubjects.subjectId, subjectId))).limit(1);
+  const existing = await db.select().from(examSubjects).where(and(eq(examSubjects.examId, examId), eq(examSubjects.classId, classId), eq(examSubjects.subjectId, subjectId), eq(examSubjects.schoolId, schoolId))).limit(1);
   if (existing.length > 0) {
-    await db.update(examSubjects).set({ fullMarks, practicalMarks, passMarks }).where(eq(examSubjects.id, existing[0].id));
+    await db.update(examSubjects).set({ fullMarks, practicalMarks, passMarks }).where(and(eq(examSubjects.id, existing[0].id), eq(examSubjects.schoolId, schoolId)));
   } else {
-    await db.insert(examSubjects).values({ examId, classId, subjectId, fullMarks, practicalMarks, passMarks });
+    await db.insert(examSubjects).values({ examId, classId, subjectId, fullMarks, practicalMarks, passMarks, schoolId });
   }
   await logAudit(user.id, "Configured exam subject", "examSubject", undefined, `exam ${examId}`);
   await flashTo(`/examinations?exam=${examId}`, "Subject configuration saved.");
@@ -69,17 +73,18 @@ export async function saveExamSubject(formData: FormData) {
 export async function bulkAddExamSubjects(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const examId = Number(formData.get("examId"));
   const classId = Number(formData.get("classId"));
   const fullMarks = Number(formData.get("fullMarks") ?? 100);
   const practicalMarks = Number(formData.get("practicalMarks") ?? 0);
   const passMarks = Number(formData.get("passMarks") ?? 40);
-  const cs = await db.select().from(classSubjects).where(eq(classSubjects.classId, classId));
+  const cs = await db.select().from(classSubjects).where(and(eq(classSubjects.classId, classId), eq(classSubjects.schoolId, schoolId)));
   let n = 0;
   for (const r of cs) {
-    const exists = await db.select().from(examSubjects).where(and(eq(examSubjects.examId, examId), eq(examSubjects.classId, classId), eq(examSubjects.subjectId, r.subjectId))).limit(1);
+    const exists = await db.select().from(examSubjects).where(and(eq(examSubjects.examId, examId), eq(examSubjects.classId, classId), eq(examSubjects.subjectId, r.subjectId), eq(examSubjects.schoolId, schoolId))).limit(1);
     if (exists.length === 0) {
-      await db.insert(examSubjects).values({ examId, classId, subjectId: r.subjectId, fullMarks, practicalMarks, passMarks });
+      await db.insert(examSubjects).values({ examId, classId, subjectId: r.subjectId, fullMarks, practicalMarks, passMarks, schoolId });
       n++;
     }
   }
@@ -90,9 +95,10 @@ export async function bulkAddExamSubjects(formData: FormData) {
 export async function removeExamSubject(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
   const examId = Number(formData.get("examId"));
-  await db.delete(examSubjects).where(eq(examSubjects.id, id));
+  await db.delete(examSubjects).where(and(eq(examSubjects.id, id), eq(examSubjects.schoolId, schoolId)));
   await logAudit(user.id, "Removed exam subject", "examSubject", id);
   await flashTo(`/examinations?exam=${examId}`, "Subject removed.");
 }
@@ -106,15 +112,16 @@ function s(v: FormDataEntryValue | null) {
 
 export default async function ExamsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   const isAdmin = user.role === "admin";
   const sp = await searchParams;
 
   const [allYears, allClasses] = await Promise.all([
-    db.select().from(academicYears).orderBy(desc(academicYears.id)),
-    db.select().from(classes).orderBy(classes.sortOrder),
+    db.select().from(academicYears).where(eq(academicYears.schoolId, schoolId)).orderBy(desc(academicYears.id)),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
   ]);
 
-  if (user.role === "student" || user.role === "parent") return <Routine user={user} allClasses={allClasses} />;
+  if (user.role === "student" || user.role === "parent") return <Routine user={user} allClasses={allClasses} schoolId={schoolId} />;
 
   const exams = await db
     .select({
@@ -125,6 +132,7 @@ export default async function ExamsPage({ searchParams }: { searchParams: Promis
     })
     .from(examinations)
     .innerJoin(academicYears, eq(academicYears.id, examinations.academicYearId))
+    .where(eq(examinations.schoolId, schoolId))
     .orderBy(desc(examinations.id));
 
   const examId = sp.exam ? Number(sp.exam) : null;
@@ -144,7 +152,7 @@ export default async function ExamsPage({ searchParams }: { searchParams: Promis
       })
       .from(examSubjects)
       .innerJoin(subjects, eq(subjects.id, examSubjects.subjectId))
-      .where(eq(examSubjects.examId, cfgExam.e.id))
+      .where(and(eq(examSubjects.examId, cfgExam.e.id), eq(examSubjects.schoolId, schoolId)))
       .orderBy(examSubjects.classId);
     cfgData = allClasses
       .filter((c) => rows.some((r) => r.classId === c.id))
@@ -206,7 +214,7 @@ export default async function ExamsPage({ searchParams }: { searchParams: Promis
               {isCfg && isAdmin && (
                 <div className="border-t border-line bg-forest-mist/40 px-5 py-4">
                   <h4 className="font-bold text-sm text-ink mb-3">Subjects & marks by class</h4>
-                  <ExamConfig examId={e.id} allClasses={allClasses} data={cfgData} />
+                  <ExamConfig examId={e.id} allClasses={allClasses} data={cfgData} schoolId={schoolId} />
                 </div>
               )}
             </div>
@@ -225,11 +233,11 @@ function LinkToMarks({ examId }: { examId: number }) {
   );
 }
 
-async function ExamConfig({ examId, allClasses, data }: { examId: number; allClasses: { id: number; name: string }[]; data: any[] }) {
-  const allSubjects = await db.select().from(subjects).orderBy(subjects.name);
+async function ExamConfig({ examId, allClasses, data, schoolId }: { examId: number; allClasses: { id: number; name: string }[]; data: any[]; schoolId: number }) {
+  const allSubjects = await db.select().from(subjects).where(eq(subjects.schoolId, schoolId)).orderBy(subjects.name);
   const existingClassIds = new Set(data.map((d) => d.classId));
   const [csRows] = await Promise.all([
-    db.select().from(classSubjects).orderBy(classSubjects.id),
+    db.select().from(classSubjects).where(eq(classSubjects.schoolId, schoolId)).orderBy(classSubjects.id),
   ]);
   return (
     <div className="grid lg:grid-cols-3 gap-4">
@@ -366,15 +374,15 @@ function ExamForm({ years, exam, today }: { years: { id: number; name: string }[
 
 /* --------------------------- Student / parent routine ------------------------- */
 
-async function Routine({ user, allClasses }: { user: any; allClasses: any[] }) {
+async function Routine({ user, allClasses, schoolId }: { user: any; allClasses: any[]; schoolId: number }) {
   let classId: number | null = null;
   if (user.role === "student") {
-    const [enr] = await db.select().from(enrollments).where(and(eq(enrollments.studentId, user.studentId), eq(enrollments.status, "active"))).limit(1);
+    const [enr] = await db.select().from(enrollments).where(and(eq(enrollments.studentId, user.studentId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId))).limit(1);
     classId = enr?.classId ?? null;
   } else {
-    const children = await db.select().from(parentChildren).where(eq(parentChildren.userId, user.id));
+    const children = await db.select().from(parentChildren).where(and(eq(parentChildren.userId, user.id), eq(parentChildren.schoolId, schoolId)));
     if (children.length > 0) {
-      const [enr] = await db.select().from(enrollments).where(and(eq(enrollments.studentId, children[0].studentId), eq(enrollments.status, "active"))).limit(1);
+      const [enr] = await db.select().from(enrollments).where(and(eq(enrollments.studentId, children[0].studentId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId))).limit(1);
       classId = enr?.classId ?? null;
     }
   }
@@ -386,6 +394,7 @@ async function Routine({ user, allClasses }: { user: any; allClasses: any[] }) {
     })
     .from(examinations)
     .innerJoin(academicYears, eq(academicYears.id, examinations.academicYearId))
+    .where(eq(examinations.schoolId, schoolId))
     .orderBy(examinations.startDate)
     .limit(12);
 
@@ -395,7 +404,7 @@ async function Routine({ user, allClasses }: { user: any; allClasses: any[] }) {
       .select({ examId: examSubjects.examId, subjectName: subjects.name, fullMarks: examSubjects.fullMarks })
       .from(examSubjects)
       .innerJoin(subjects, eq(subjects.id, examSubjects.subjectId))
-      .where(and(eq(examSubjects.classId, classId)))
+      .where(and(eq(examSubjects.classId, classId), eq(examSubjects.schoolId, schoolId)))
       .orderBy(subjects.name);
   }
 

@@ -1,9 +1,10 @@
 import { desc } from "drizzle-orm";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { auditLogs, users } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
 import { fmtDate } from "@/lib/grading";
+import { currentSchoolId } from "@/lib/tenant";
 import { PageHead, Icon, Empty, Avatar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,7 @@ const iconFor = (action: string) => {
 
 export default async function ActivityPage() {
   await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const rows = await db
     .select({
       id: auditLogs.id,
@@ -35,7 +37,8 @@ export default async function ActivityPage() {
       userId: auditLogs.userId,
     })
     .from(auditLogs)
-    .leftJoin(users, eq(users.id, auditLogs.userId))
+    .leftJoin(users, and(eq(users.id, auditLogs.userId), eq(users.schoolId, schoolId)))
+    .where(eq(auditLogs.schoolId, schoolId))
     .orderBy(desc(auditLogs.createdAt))
     .limit(120);
 

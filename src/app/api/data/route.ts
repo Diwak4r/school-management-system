@@ -30,6 +30,7 @@ import {
   feePayments,
 } from "@/db/schema";
 import { getSessionUser } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { computeClassResults, getScale } from "@/lib/grading";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +74,8 @@ export async function GET(req: Request) {
     );
   }
 
+  const schoolId = await currentSchoolId();
+
   const url = new URL(req.url);
   const op = url.searchParams.get("op");
   const type = url.searchParams.get("type") ?? "students";
@@ -108,7 +111,9 @@ export async function GET(req: Request) {
     const out: Record<string, unknown[]> = {};
 
     for (const [name, table] of tables) {
-      out[name] = await db.select().from(table);
+      out[name] = name === "settings"
+        ? await db.select().from(table as any)
+        : await db.select().from(table as any).where(eq((table as any).schoolId, schoolId));
     }
 
     return new Response(
@@ -154,12 +159,13 @@ export async function GET(req: Request) {
         enrollments,
         and(
           eq(enrollments.studentId, students.id),
-          eq(enrollments.status, "active")
+          eq(enrollments.status, "active"),
+          eq(enrollments.schoolId, schoolId)
         )
       )
-      .leftJoin(classes, eq(classes.id, enrollments.classId))
-      .leftJoin(sections, eq(sections.id, enrollments.sectionId))
-      .where(sql`${students.deletedAt} is null`)
+      .leftJoin(classes, and(eq(classes.id, enrollments.classId), eq(classes.schoolId, schoolId)))
+      .leftJoin(sections, and(eq(sections.id, enrollments.sectionId), eq(sections.schoolId, schoolId)))
+      .where(and(sql`${students.deletedAt} is null`, eq(students.schoolId, schoolId)))
       .orderBy(students.name);
 
     return csvResponse(
@@ -194,7 +200,9 @@ export async function GET(req: Request) {
   }
 
   if (type === "teachers") {
-    const rows = await db.select().from(teachers).orderBy(teachers.name);
+    const rows = await db.select().from(teachers)
+      .where(eq(teachers.schoolId, schoolId))
+      .orderBy(teachers.name);
 
     return csvResponse(
       toCsv(
@@ -232,15 +240,18 @@ export async function GET(req: Request) {
           select count(*)
           from sections
           where sections.class_id = ${classes.id}
+          and sections.school_id = ${schoolId}
         )::int`,
         students: sql<number>`(
           select count(*)
           from enrollments
           where enrollments.class_id = ${classes.id}
+          and enrollments.school_id = ${schoolId}
           and enrollments.status = 'active'
         )::int`,
       })
       .from(classes)
+      .where(eq(classes.schoolId, schoolId))
       .orderBy(classes.sortOrder);
 
     return csvResponse(
@@ -301,6 +312,7 @@ export async function GET(req: Request) {
           select student_id
           from enrollments
           where class_id = ${parsedClassId}
+          and school_id = ${schoolId}
           and status = 'active'
           ${
             parsedSectionId
@@ -318,8 +330,8 @@ export async function GET(req: Request) {
         status: attendance.status,
       })
       .from(attendance)
-      .innerJoin(students, eq(students.id, attendance.studentId))
-      .where(where)
+      .innerJoin(students, and(eq(students.id, attendance.studentId), eq(students.schoolId, schoolId)))
+      .where(and(where, eq(attendance.schoolId, schoolId)))
       .orderBy(attendance.attDate)
       .limit(20000);
 
@@ -338,7 +350,7 @@ export async function GET(req: Request) {
     const [exam] = await db
       .select()
       .from(examinations)
-      .where(eq(examinations.status, "published"))
+      .where(and(eq(examinations.status, "published"), eq(examinations.schoolId, schoolId)))
       .orderBy(sql`coalesce(end_date, start_date) desc`)
       .limit(1);
 
@@ -352,6 +364,7 @@ export async function GET(req: Request) {
     const clsList = await db
       .select()
       .from(classes)
+      .where(eq(classes.schoolId, schoolId))
       .orderBy(classes.sortOrder);
 
     const out: unknown[][] = [];
@@ -412,6 +425,17 @@ export async function POST(req: Request) {
   if (user.role !== "admin") {
     return NextResponse.json(
       { error: "Admin only" },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } }
+    );
+  }
+
+  const schoolId = await currentSchoolId();
+
+  // Restore swaps global settings/sequences and every row in the backup, so a
+  // per-school restore cannot be made safe. Only the original school may restore.
+  if (schoolId !== 1) {
+    return NextResponse.json(
+      { error: "Restore is only supported for the default school (school 1)." },
       { status: 403, headers: { "Cache-Control": "private, no-store" } }
     );
   }

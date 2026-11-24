@@ -2,6 +2,7 @@ import { eq, and, sql, asc, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { classes, sections, students, enrollments, academicYears } from "@/db/schema";
 import { requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Badge, Icon, Empty } from "@/components/ui";
 
@@ -10,6 +11,7 @@ export const dynamic = "force-dynamic";
 export async function promoteStudents(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const fromClass = Number(formData.get("fromClass"));
   const fromSection = formData.get("fromSection") ? Number(formData.get("fromSection")) : null;
   const toClass = Number(formData.get("toClass"));
@@ -18,7 +20,7 @@ export async function promoteStudents(formData: FormData) {
   if (!fromClass || !toClass) await flashTo("/promotion", "Select source and destination classes.", true);
   if (ids.length === 0) await flashTo("/promotion", "Select at least one student to promote.", true);
 
-  const [activeYear] = await db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1);
+  const [activeYear] = await db.select().from(academicYears).where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId))).limit(1);
   if (!activeYear) {
     await flashTo("/promotion", "Create and activate an academic year first.", true);
     return;
@@ -27,11 +29,11 @@ export async function promoteStudents(formData: FormData) {
   // class lists, reports and marksheets. Changing year is a separate admin action.
   const targetYearId = activeYear.id;
 
-  const [toClassRow] = await db.select().from(classes).where(eq(classes.id, toClass)).limit(1);
+  const [toClassRow] = await db.select().from(classes).where(and(eq(classes.id, toClass), eq(classes.schoolId, schoolId))).limit(1);
   const maxRoll = await db
     .select({ r: sql<number>`coalesce(max(roll_no), 0)::int` })
     .from(enrollments)
-    .where(and(eq(enrollments.classId, toClass), eq(enrollments.academicYearId, targetYearId)));
+    .where(and(eq(enrollments.classId, toClass), eq(enrollments.academicYearId, targetYearId), eq(enrollments.schoolId, schoolId)));
 
   let count = 0;
   for (let i = 0; i < ids.length; i++) {
@@ -39,10 +41,10 @@ export async function promoteStudents(formData: FormData) {
     const [enr] = await db
       .select()
       .from(enrollments)
-      .where(and(eq(enrollments.studentId, sid), eq(enrollments.classId, fromClass), eq(enrollments.status, "active")))
+      .where(and(eq(enrollments.studentId, sid), eq(enrollments.classId, fromClass), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)))
       .limit(1);
     if (!enr) continue;
-    await db.update(enrollments).set({ status: "promoted" }).where(eq(enrollments.id, enr.id));
+    await db.update(enrollments).set({ status: "promoted" }).where(and(eq(enrollments.id, enr.id), eq(enrollments.schoolId, schoolId)));
     await db.insert(enrollments).values({
       studentId: sid,
       classId: toClass,
@@ -51,6 +53,7 @@ export async function promoteStudents(formData: FormData) {
       academicYearId: targetYearId,
       admissionDate: enr.admissionDate,
       status: "active",
+      schoolId,
     });
     count++;
   }
@@ -61,6 +64,7 @@ export async function promoteStudents(formData: FormData) {
 
 export default async function PromotionPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const sp = await searchParams;
   const fromClass = sp.fromClass ? Number(sp.fromClass) : null;
   const fromSection = sp.fromSection ? Number(sp.fromSection) : null;
@@ -68,9 +72,9 @@ export default async function PromotionPage({ searchParams }: { searchParams: Pr
   const toSection = sp.toSection ? Number(sp.toSection) : null;
 
   const [allClasses, allSections, activeYearRows] = await Promise.all([
-    db.select().from(classes).orderBy(classes.sortOrder),
-    db.select().from(sections).orderBy(sections.name),
-    db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
+    db.select().from(sections).where(eq(sections.schoolId, schoolId)).orderBy(sections.name),
+    db.select().from(academicYears).where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId))).limit(1),
   ]);
   const activeYear = activeYearRows[0];
 
@@ -82,8 +86,8 @@ export default async function PromotionPage({ searchParams }: { searchParams: Pr
       .innerJoin(students, eq(students.id, enrollments.studentId))
       .where(
       fromSection
-        ? and(eq(enrollments.classId, fromClass), eq(enrollments.sectionId, fromSection), eq(enrollments.status, "active"))
-        : and(eq(enrollments.classId, fromClass), eq(enrollments.status, "active")),
+        ? and(eq(enrollments.classId, fromClass), eq(enrollments.sectionId, fromSection), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId))
+        : and(eq(enrollments.classId, fromClass), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)),
       )
       .orderBy(enrollments.rollNo);
   }

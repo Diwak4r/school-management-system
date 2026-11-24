@@ -1,8 +1,9 @@
 
-import { eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { users, students, teachers, sessions } from "@/db/schema";
 import { requireRole, hashPassword, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import {
   PageHead,
@@ -22,6 +23,7 @@ export async function createStudentAccount(formData: FormData) {
   "use server";
 
   const admin = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const studentId = Number(formData.get("studentId"));
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
@@ -41,7 +43,7 @@ export async function createStudentAccount(formData: FormData) {
   const [student] = await db
     .select()
     .from(students)
-    .where(eq(students.id, studentId))
+    .where(and(eq(students.id, studentId), eq(students.schoolId, schoolId)))
     .limit(1);
 
   if (!student || student.deletedAt) {
@@ -51,7 +53,7 @@ export async function createStudentAccount(formData: FormData) {
   const [linked] = await db
     .select({ id: users.id })
     .from(users)
-    .where(eq(users.studentId, studentId))
+    .where(and(eq(users.studentId, studentId), eq(users.schoolId, schoolId)))
     .limit(1);
 
   if (linked) {
@@ -61,7 +63,7 @@ export async function createStudentAccount(formData: FormData) {
   const [duplicateEmail] = await db
     .select({ id: users.id })
     .from(users)
-    .where(eq(users.email, email))
+    .where(and(eq(users.email, email), eq(users.schoolId, schoolId)))
     .limit(1);
 
   if (duplicateEmail) {
@@ -69,6 +71,7 @@ export async function createStudentAccount(formData: FormData) {
   }
 
   await db.insert(users).values({
+    schoolId,
     name: student.name,
     email,
     passwordHash: hashPassword(password),
@@ -93,6 +96,7 @@ export async function createTeacherAccount(formData: FormData) {
   "use server";
 
   const admin = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const teacherId = Number(formData.get("teacherId"));
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
@@ -112,7 +116,7 @@ export async function createTeacherAccount(formData: FormData) {
   const [teacher] = await db
     .select()
     .from(teachers)
-    .where(eq(teachers.id, teacherId))
+    .where(and(eq(teachers.id, teacherId), eq(teachers.schoolId, schoolId)))
     .limit(1);
 
   if (!teacher || teacher.status !== "active") {
@@ -122,7 +126,7 @@ export async function createTeacherAccount(formData: FormData) {
   const [linked] = await db
     .select({ id: users.id })
     .from(users)
-    .where(eq(users.teacherId, teacherId))
+    .where(and(eq(users.teacherId, teacherId), eq(users.schoolId, schoolId)))
     .limit(1);
 
   if (linked) {
@@ -132,7 +136,7 @@ export async function createTeacherAccount(formData: FormData) {
   const [duplicateEmail] = await db
     .select({ id: users.id })
     .from(users)
-    .where(eq(users.email, email))
+    .where(and(eq(users.email, email), eq(users.schoolId, schoolId)))
     .limit(1);
 
   if (duplicateEmail) {
@@ -140,6 +144,7 @@ export async function createTeacherAccount(formData: FormData) {
   }
 
   await db.insert(users).values({
+    schoolId,
     name: teacher.name,
     email,
     passwordHash: hashPassword(password),
@@ -164,6 +169,7 @@ export async function resetAccountPassword(formData: FormData) {
   "use server";
 
   const admin = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const userId = Number(formData.get("userId"));
   const password = String(formData.get("password") ?? "");
 
@@ -178,7 +184,7 @@ export async function resetAccountPassword(formData: FormData) {
   const [account] = await db
     .select()
     .from(users)
-    .where(eq(users.id, userId))
+    .where(and(eq(users.id, userId), eq(users.schoolId, schoolId)))
     .limit(1);
 
   if (!account || !["student", "teacher"].includes(account.role)) {
@@ -188,7 +194,7 @@ export async function resetAccountPassword(formData: FormData) {
   await db
     .update(users)
     .set({ passwordHash: hashPassword(password) })
-    .where(eq(users.id, userId));
+    .where(and(eq(users.id, userId), eq(users.schoolId, schoolId)));
 
   // Revoke all existing sessions for this account.
   await db.delete(sessions).where(eq(sessions.userId, userId));
@@ -208,6 +214,7 @@ export async function resetAccountPassword(formData: FormData) {
 
 export default async function UsersPage() {
   await requireRole("admin");
+  const schoolId = await currentSchoolId();
 
   const [accounts, allStudents, allTeachers] = await Promise.all([
     db
@@ -225,20 +232,21 @@ export default async function UsersPage() {
         employeeNo: teachers.employeeNo,
       })
       .from(users)
-      .leftJoin(students, eq(users.studentId, students.id))
-      .leftJoin(teachers, eq(users.teacherId, teachers.id))
+      .leftJoin(students, and(eq(users.studentId, students.id), eq(students.schoolId, schoolId)))
+      .leftJoin(teachers, and(eq(users.teacherId, teachers.id), eq(teachers.schoolId, schoolId)))
+      .where(eq(users.schoolId, schoolId))
       .orderBy(users.role, users.name),
 
     db
       .select()
       .from(students)
-      .where(isNull(students.deletedAt))
+      .where(and(isNull(students.deletedAt), eq(students.schoolId, schoolId)))
       .orderBy(students.name),
 
     db
       .select()
       .from(teachers)
-      .where(eq(teachers.status, "active"))
+      .where(and(eq(teachers.status, "active"), eq(teachers.schoolId, schoolId)))
       .orderBy(teachers.name),
   ]);
 

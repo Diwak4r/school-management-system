@@ -19,6 +19,7 @@ import { redirect } from "next/navigation";
 import { feePaymentPool } from "@/lib/fee-payment-pool";
 import { randomUUID } from "node:crypto";
 import { todayStr } from "@/lib/grading";
+import { currentSchoolId } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
@@ -32,17 +33,19 @@ function money(paisa: number) {
 export async function addFeeCategory(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
 
   if (!name) await flashTo("/fees", "Enter a fee category name.", true);
 
   const existing = await db.select().from(feeCategories)
-    .where(eq(feeCategories.name, name)).limit(1);
+    .where(and(eq(feeCategories.name, name), eq(feeCategories.schoolId, schoolId))).limit(1);
 
   if (existing.length) await flashTo("/fees", "This fee category already exists.", true);
 
   await db.insert(feeCategories).values({
+    schoolId,
     name,
     description: description || null,
   });
@@ -54,6 +57,7 @@ export async function addFeeCategory(formData: FormData) {
 export async function addFeeStructure(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
 
   const categoryId = Number(formData.get("categoryId"));
   const classId = Number(formData.get("classId"));
@@ -82,17 +86,18 @@ export async function addFeeStructure(formData: FormData) {
   }
 
   const [category] = await db.select().from(feeCategories)
-    .where(and(eq(feeCategories.id, categoryId), eq(feeCategories.isActive, true))).limit(1);
+    .where(and(eq(feeCategories.id, categoryId), eq(feeCategories.isActive, true), eq(feeCategories.schoolId, schoolId))).limit(1);
   const [schoolClass] = await db.select().from(classes)
-    .where(eq(classes.id, classId)).limit(1);
+    .where(and(eq(classes.id, classId), eq(classes.schoolId, schoolId))).limit(1);
   const [year] = await db.select().from(academicYears)
-    .where(eq(academicYears.id, academicYearId)).limit(1);
+    .where(and(eq(academicYears.id, academicYearId), eq(academicYears.schoolId, schoolId))).limit(1);
 
   if (!category || !schoolClass || !year) {
     await flashTo("/fees", "Invalid category, class, or academic year.", true);
   }
 
   await db.insert(feeStructures).values({
+    schoolId,
     categoryId,
     classId,
     academicYearId,
@@ -107,6 +112,7 @@ export async function addFeeStructure(formData: FormData) {
 export async function createFeeInvoice(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
 
   const studentId = Number(formData.get("studentId"));
   const structureId = Number(formData.get("structureId"));
@@ -121,9 +127,9 @@ export async function createFeeInvoice(formData: FormData) {
   }
 
   const [student] = await db.select().from(students)
-    .where(and(eq(students.id, studentId), isNull(students.deletedAt))).limit(1);
+    .where(and(eq(students.id, studentId), isNull(students.deletedAt), eq(students.schoolId, schoolId))).limit(1);
   const [structure] = await db.select().from(feeStructures)
-    .where(and(eq(feeStructures.id, structureId), eq(feeStructures.isActive, true))).limit(1);
+    .where(and(eq(feeStructures.id, structureId), eq(feeStructures.isActive, true), eq(feeStructures.schoolId, schoolId))).limit(1);
 
   if (!student || !structure) {
     await flashTo("/fees", "Student or fee structure not found.", true);
@@ -135,6 +141,7 @@ export async function createFeeInvoice(formData: FormData) {
       eq(enrollments.classId, structure.classId),
       eq(enrollments.academicYearId, structure.academicYearId),
       eq(enrollments.status, "active"),
+      eq(enrollments.schoolId, schoolId),
     )).limit(1);
 
   if (!enrollment) {
@@ -159,8 +166,8 @@ export async function createFeeInvoice(formData: FormData) {
       `INSERT INTO fee_invoices
         (invoice_no, student_id, enrollment_id, academic_year_id,
          issue_date, due_date, subtotal_paisa, discount_paisa,
-         total_paisa, status, created_by_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         total_paisa, status, created_by_id, school_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
         invoiceNo,
@@ -174,6 +181,7 @@ export async function createFeeInvoice(formData: FormData) {
         structure.amountPaisa,
         "issued",
         user.id,
+        schoolId,
       ],
     );
 
@@ -188,8 +196,8 @@ export async function createFeeInvoice(formData: FormData) {
     await client.query(
       `INSERT INTO fee_invoice_items
         (invoice_id, fee_structure_id, category_id, description,
-         amount_paisa, discount_paisa, total_paisa)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         amount_paisa, discount_paisa, total_paisa, school_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         invoiceId,
         structure.id,
@@ -198,6 +206,7 @@ export async function createFeeInvoice(formData: FormData) {
         structure.amountPaisa,
         0,
         structure.amountPaisa,
+        schoolId,
       ],
     );
 
@@ -216,6 +225,7 @@ export async function createFeeInvoice(formData: FormData) {
 export async function collectFeePayment(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
 
   const invoiceId = Number(formData.get("invoiceId"));
   const amount = Number(formData.get("amount"));
@@ -243,8 +253,8 @@ export async function collectFeePayment(formData: FormData) {
     await client.query("BEGIN");
 
     const invoiceResult = await client.query<{ id: number; total_paisa: number }>(
-      "SELECT id, total_paisa FROM fee_invoices WHERE id = $1 FOR UPDATE",
-      [invoiceId],
+      "SELECT id, total_paisa FROM fee_invoices WHERE id = $1 AND school_id = $2 FOR UPDATE",
+      [invoiceId, schoolId],
     );
     const invoice = invoiceResult.rows[0];
 
@@ -253,8 +263,8 @@ export async function collectFeePayment(formData: FormData) {
       await client.query("ROLLBACK");
     } else {
       const paidResult = await client.query<{ total: string | number }>(
-        "SELECT COALESCE(SUM(amount_paisa), 0)::int AS total FROM fee_payments WHERE invoice_id = $1",
-        [invoiceId],
+        "SELECT COALESCE(SUM(amount_paisa), 0)::int AS total FROM fee_payments WHERE invoice_id = $1 AND school_id = $2",
+        [invoiceId, schoolId],
       );
       const paid = Number(paidResult.rows[0]?.total ?? 0);
       const balance = Number(invoice.total_paisa) - paid;
@@ -270,15 +280,15 @@ export async function collectFeePayment(formData: FormData) {
 
         await client.query(
           `INSERT INTO fee_payments
-            (invoice_id, receipt_no, amount_paisa, payment_method, transaction_ref, received_by_id)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [invoiceId, receiptNo, amountPaisa, paymentMethod, transactionRef || null, user.id],
+            (invoice_id, receipt_no, amount_paisa, payment_method, transaction_ref, received_by_id, school_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [invoiceId, receiptNo, amountPaisa, paymentMethod, transactionRef || null, user.id, schoolId],
         );
 
         const newPaid = paid + amountPaisa;
         await client.query(
-          "UPDATE fee_invoices SET status = $1 WHERE id = $2",
-          [newPaid >= Number(invoice.total_paisa) ? "paid" : "partial", invoiceId],
+          "UPDATE fee_invoices SET status = $1 WHERE id = $2 AND school_id = $3",
+          [newPaid >= Number(invoice.total_paisa) ? "paid" : "partial", invoiceId, schoolId],
         );
         await client.query("COMMIT");
       }
@@ -300,9 +310,10 @@ export async function collectFeePayment(formData: FormData) {
 
 export default async function FeesPage() {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
 
   const [categories, structures, years, schoolClasses] = await Promise.all([
-    db.select().from(feeCategories).orderBy(feeCategories.name),
+    db.select().from(feeCategories).where(eq(feeCategories.schoolId, schoolId)).orderBy(feeCategories.name),
     db.select({
       id: feeStructures.id,
       amountPaisa: feeStructures.amountPaisa,
@@ -312,13 +323,13 @@ export default async function FeesPage() {
       yearName: academicYears.name,
     })
       .from(feeStructures)
-      .innerJoin(feeCategories, eq(feeCategories.id, feeStructures.categoryId))
-      .innerJoin(classes, eq(classes.id, feeStructures.classId))
-      .innerJoin(academicYears, eq(academicYears.id, feeStructures.academicYearId))
-      .where(eq(feeStructures.isActive, true))
+      .innerJoin(feeCategories, and(eq(feeCategories.id, feeStructures.categoryId), eq(feeCategories.schoolId, schoolId)))
+      .innerJoin(classes, and(eq(classes.id, feeStructures.classId), eq(classes.schoolId, schoolId)))
+      .innerJoin(academicYears, and(eq(academicYears.id, feeStructures.academicYearId), eq(academicYears.schoolId, schoolId)))
+      .where(and(eq(feeStructures.isActive, true), eq(feeStructures.schoolId, schoolId)))
       .orderBy(desc(feeStructures.id)),
-    db.select().from(academicYears).orderBy(desc(academicYears.id)),
-    db.select().from(classes).orderBy(classes.sortOrder),
+    db.select().from(academicYears).where(eq(academicYears.schoolId, schoolId)).orderBy(desc(academicYears.id)),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
   ]);
 
   let studentOptions: { id: number; name: string; admissionNo: string }[] = [];
@@ -329,13 +340,13 @@ export default async function FeesPage() {
       id: students.id,
       name: students.name,
       admissionNo: students.admissionNo,
-    }).from(students).orderBy(students.name);
+    }).from(students).where(eq(students.schoolId, schoolId)).orderBy(students.name);
   } else if (user.role === "student") {
     if (!user.studentId) redirect("/dashboard");
     visibleStudentIds = [user.studentId];
   } else if (user.role === "parent") {
     const children = await db.select({ studentId: parentChildren.studentId })
-      .from(parentChildren).where(eq(parentChildren.userId, user.id));
+      .from(parentChildren).where(and(eq(parentChildren.userId, user.id), eq(parentChildren.schoolId, schoolId)));
     visibleStudentIds = children.map((child) => child.studentId);
   } else {
     redirect("/fees/class");
@@ -351,16 +362,16 @@ export default async function FeesPage() {
     dueDate: feeInvoices.dueDate,
     totalPaisa: feeInvoices.totalPaisa,
     status: feeInvoices.status,
-    paidPaisa: sql<number>`coalesce((select sum(${feePayments.amountPaisa}) from ${feePayments} where ${feePayments.invoiceId} = ${feeInvoices.id}), 0)::int`,
+    paidPaisa: sql<number>`coalesce((select sum(${feePayments.amountPaisa}) from ${feePayments} where ${feePayments.invoiceId} = ${feeInvoices.id} and ${feePayments.schoolId} = ${schoolId}), 0)::int`,
   })
     .from(feeInvoices)
-    .innerJoin(students, eq(students.id, feeInvoices.studentId))
-    .innerJoin(academicYears, eq(academicYears.id, feeInvoices.academicYearId));
+    .innerJoin(students, and(eq(students.id, feeInvoices.studentId), eq(students.schoolId, schoolId)))
+    .innerJoin(academicYears, and(eq(academicYears.id, feeInvoices.academicYearId), eq(academicYears.schoolId, schoolId)));
 
   const invoices = user.role === "admin"
-    ? await invoiceQuery.orderBy(desc(feeInvoices.createdAt))
+    ? await invoiceQuery.where(eq(feeInvoices.schoolId, schoolId)).orderBy(desc(feeInvoices.createdAt))
     : visibleStudentIds && visibleStudentIds.length > 0
-      ? await invoiceQuery.where(inArray(feeInvoices.studentId, visibleStudentIds)).orderBy(desc(feeInvoices.createdAt))
+      ? await invoiceQuery.where(and(eq(feeInvoices.schoolId, schoolId), inArray(feeInvoices.studentId, visibleStudentIds))).orderBy(desc(feeInvoices.createdAt))
       : [];
 
   if (user.role !== "admin") {
@@ -399,7 +410,7 @@ export default async function FeesPage() {
   }
 
   const [allStudents, paymentRows] = await Promise.all([
-    db.select({ id: students.id, name: students.name, admissionNo: students.admissionNo }).from(students).orderBy(students.name),
+    db.select({ id: students.id, name: students.name, admissionNo: students.admissionNo }).from(students).where(eq(students.schoolId, schoolId)).orderBy(students.name),
     db.select({
       id: feePayments.id,
       receiptNo: feePayments.receiptNo,
@@ -407,7 +418,7 @@ export default async function FeesPage() {
       amountPaisa: feePayments.amountPaisa,
       method: feePayments.paymentMethod,
       paidAt: feePayments.paidAt,
-    }).from(feePayments).orderBy(desc(feePayments.paidAt)).limit(10),
+    }).from(feePayments).where(eq(feePayments.schoolId, schoolId)).orderBy(desc(feePayments.paidAt)).limit(10),
   ]);
 
   const totalBilled = invoices.reduce((sum, invoice) => sum + invoice.totalPaisa, 0);

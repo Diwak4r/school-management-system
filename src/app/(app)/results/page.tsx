@@ -13,6 +13,7 @@ import {
   academicYears,
 } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { computeClassResults, fmtDate, getScale, StudentResult } from "@/lib/grading";
 import { PageHead, Badge, Icon, Empty, Field } from "@/components/ui";
@@ -22,6 +23,7 @@ export const dynamic = "force-dynamic";
 export async function setExamStatus(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
   const status = String(formData.get("status"));
   if (!["scheduled", "completed", "published"].includes(status)) await flashTo("/results", "Invalid status.", true);
@@ -30,7 +32,7 @@ export async function setExamStatus(formData: FormData) {
     const missing = await db
       .select({ c: sql<number>`count(*)::int` })
       .from(examSubjects)
-      .where(and(eq(examSubjects.examId, id), sql`${examSubjects.id} not in (select m.exam_subject_id from marks m)`));
+      .where(and(eq(examSubjects.examId, id), sql`${examSubjects.id} not in (select m.exam_subject_id from marks m)`, eq(examSubjects.schoolId, schoolId)));
     if (missing[0].c > 0) {
       await flashTo(`/results?exam=${id}`, `Cannot publish: ${missing[0].c} subject group(s) have no marks entered at all. Enter marks first.`, true);
       return;

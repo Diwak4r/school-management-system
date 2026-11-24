@@ -17,14 +17,14 @@ type NavItem = {
 
 const items: NavItem[] = [
   { label: "Overview", href: "/superadmin", icon: "grid", section: "Platform" },
-  { label: "Schools", href: "/superadmin/schools", icon: "cap", section: "Platform", planned: true },
-  { label: "Users", href: "/superadmin/users", icon: "users", section: "Platform", planned: true },
-  { label: "Subscriptions", href: "/superadmin/subscriptions", icon: "calendar", section: "Platform", planned: true },
-  { label: "Plans", href: "/superadmin/plans", icon: "file", section: "Platform", planned: true },
-  { label: "Analytics", href: "/superadmin/analytics", icon: "chart", section: "Insights", planned: true },
-  { label: "Reports", href: "/superadmin/reports", icon: "file", section: "Insights", planned: true },
-  { label: "Audit Logs", href: "/superadmin/audit", icon: "shield", section: "Insights", planned: true },
-  { label: "Platform Settings", href: "/superadmin/settings", icon: "gear", section: "System", planned: true },
+  { label: "Schools", href: "/superadmin/schools", icon: "cap", section: "Platform" },
+  { label: "Users", href: "/superadmin/users", icon: "users", section: "Platform" },
+  { label: "Subscriptions", href: "/superadmin/subscriptions", icon: "calendar", section: "Platform" },
+  { label: "Plans", href: "/superadmin/plans", icon: "file", section: "Platform" },
+  { label: "Analytics", href: "/superadmin/analytics", icon: "chart", section: "Insights" },
+  { label: "Reports", href: "/superadmin/reports", icon: "file", section: "Insights" },
+  { label: "Audit Logs", href: "/superadmin/audit", icon: "shield", section: "Insights" },
+  { label: "Platform Settings", href: "/superadmin/settings", icon: "gear", section: "System" },
   { label: "My Profile", href: "/profile", icon: "user", section: "Account" },
 ];
 

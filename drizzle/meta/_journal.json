@@ -22,6 +22,27 @@
       "when": 1795157947890,
       "tag": "0002_brave_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795524893632,
+      "tag": "0003_mature_quentin_quire",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795527696396,
+      "tag": "0004_high_archangel",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795528308888,
+      "tag": "0005_fix_school_sequence",
+      "breakpoints": true
     }
   ]
 }

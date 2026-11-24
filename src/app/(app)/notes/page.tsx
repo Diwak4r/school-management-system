@@ -4,6 +4,7 @@ import { notes, classes, sections, subjects, users, enrollments, classSubjects, 
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
 import { flashTo } from "@/actions/auth";
 import { fmtDate } from "@/lib/grading";
+import { currentSchoolId } from "@/lib/tenant";
 import { PageHead, Badge, FormModal, ConfirmButton, Icon, Empty } from "@/components/ui";
 import { FileNoteForm, ReadNote } from "./FileNoteForm";
 import { NoteForm } from "./NoteForm";
@@ -14,6 +15,7 @@ export async function saveNote(formData: FormData) {
   "use server";
   const user = await requireUser();
   if (user.role === "student" || user.role === "parent") await flashTo("/dashboard", "Not permitted.", true);
+  const schoolId = await currentSchoolId();
   const title = String(formData.get("title") ?? "").trim();
   const classId = formData.get("classId") ? Number(formData.get("classId")) : null;
   const sectionId = formData.get("sectionId") ? Number(formData.get("sectionId")) : null;
@@ -27,14 +29,14 @@ export async function saveNote(formData: FormData) {
 
   // teachers can only publish to their assigned classes
   if (user.role === "teacher" && classId) {
-    const mine = await db.select().from(classSubjects).where(eq(classSubjects.teacherId, user.teacherId!));
+    const mine = await db.select().from(classSubjects).where(and(eq(classSubjects.teacherId, user.teacherId!), eq(classSubjects.schoolId, schoolId)));
     if (!mine.some((m) => m.classId === classId)) await flashTo("/notes", "You can only publish notes to your assigned classes.", true);
   }
 
-  const [year] = await db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1);
+  const [year] = await db.select().from(academicYears).where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId))).limit(1);
   const [row] = await db
     .insert(notes)
-    .values({ title, classId, sectionId, subjectId, type, content: content || null, url, academicYearId: year?.id ?? null, uploadedById: user.id })
+    .values({ schoolId, title, classId, sectionId, subjectId, type, content: content || null, url, academicYearId: year?.id ?? null, uploadedById: user.id })
     .returning({ id: notes.id });
   await logAudit(user.id, "Uploaded note", "note", row.id, title);
   await flashTo("/notes", "Study material published.");
@@ -43,8 +45,9 @@ export async function saveNote(formData: FormData) {
 export async function deleteNote(formData: FormData) {
   "use server";
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  const [row] = await db.select().from(notes).where(eq(notes.id, id)).limit(1);
+  const [row] = await db.select().from(notes).where(and(eq(notes.id, id), eq(notes.schoolId, schoolId))).limit(1);
   if (!row) return;
   if (user.role !== "admin" && row.uploadedById !== user.id) await flashTo("/notes", "You can only delete your own notes.", true);
   if (row.url && row.url.startsWith("/uploads/")) {
@@ -55,32 +58,33 @@ export async function deleteNote(formData: FormData) {
       if (full.startsWith(path.join(process.cwd(), "public"))) fs.unlinkSync(full);
     } catch {}
   }
-  await db.delete(notes).where(eq(notes.id, id));
+  await db.delete(notes).where(and(eq(notes.id, id), eq(notes.schoolId, schoolId)));
   await logAudit(user.id, "Deleted note", "note", id, row.title);
   await flashTo("/notes", "Note removed.");
 }
 
 export default async function NotesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   const sp = await searchParams;
   const isAdmin = user.role === "admin";
   const canUpload = user.role === "admin" || user.role === "teacher";
 
   const [allClasses, allSections, allSubjects, classFilter] = await Promise.all([
-    db.select().from(classes).orderBy(classes.sortOrder),
-    db.select().from(sections).orderBy(sections.name),
-    db.select().from(subjects).orderBy(subjects.name),
-    sp.classId ? db.select().from(classes).where(eq(classes.id, Number(sp.classId))).limit(1) : Promise.resolve(null),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
+    db.select().from(sections).where(eq(sections.schoolId, schoolId)).orderBy(sections.name),
+    db.select().from(subjects).where(eq(subjects.schoolId, schoolId)).orderBy(subjects.name),
+    sp.classId ? db.select().from(classes).where(and(eq(classes.id, Number(sp.classId)), eq(classes.schoolId, schoolId))).limit(1) : Promise.resolve(null),
   ]);
 
   // scope by role
-  let where = sql`true`;
+  let where = sql`${notes.schoolId} = ${schoolId}`;
   if (user.role === "student") {
-    where = sql`${notes.classId} in (select class_id from enrollments where student_id = ${user.studentId} and status = 'active')`;
+    where = sql`${notes.schoolId} = ${schoolId} and ${notes.classId} in (select class_id from enrollments where student_id = ${user.studentId} and school_id = ${schoolId} and status = 'active')`;
   } else if (user.role === "parent") {
-    where = sql`${notes.classId} in (select class_id from enrollments where student_id in (select student_id from parent_children where user_id = ${user.id}) and status = 'active')`;
+    where = sql`${notes.schoolId} = ${schoolId} and ${notes.classId} in (select class_id from enrollments where student_id in (select student_id from parent_children where user_id = ${user.id} and school_id = ${schoolId}) and school_id = ${schoolId} and status = 'active')`;
   } else if (user.role === "teacher") {
-    where = sql`(${notes.classId} in (select class_id from class_subjects where teacher_id = ${user.teacherId}) or ${notes.uploadedById} = ${user.id})`;
+    where = sql`${notes.schoolId} = ${schoolId} and (${notes.classId} in (select class_id from class_subjects where teacher_id = ${user.teacherId} and school_id = ${schoolId}) or ${notes.uploadedById} = ${user.id})`;
   }
 
   const clsFilter = classFilter ? classFilter[0] : null;
@@ -93,10 +97,10 @@ export default async function NotesPage({ searchParams }: { searchParams: Promis
       by: users.name,
     })
     .from(notes)
-    .leftJoin(classes, eq(classes.id, notes.classId))
-    .leftJoin(sections, eq(sections.id, notes.sectionId))
-    .leftJoin(subjects, eq(subjects.id, notes.subjectId))
-    .leftJoin(users, eq(users.id, notes.uploadedById))
+    .leftJoin(classes, and(eq(classes.id, notes.classId), eq(classes.schoolId, schoolId)))
+    .leftJoin(sections, and(eq(sections.id, notes.sectionId), eq(sections.schoolId, schoolId)))
+    .leftJoin(subjects, and(eq(subjects.id, notes.subjectId), eq(subjects.schoolId, schoolId)))
+    .leftJoin(users, and(eq(users.id, notes.uploadedById), eq(users.schoolId, schoolId)))
     .where(clsFilter ? and(where, sql`${notes.classId} = ${clsFilter.id}`) : where)
     .orderBy(desc(notes.createdAt))
     .limit(80);
@@ -106,8 +110,8 @@ export default async function NotesPage({ searchParams }: { searchParams: Promis
     const rows = await db
       .select({ id: classSubjects.classId, name: classes.name })
       .from(classSubjects)
-      .innerJoin(classes, eq(classes.id, classSubjects.classId))
-      .where(eq(classSubjects.teacherId, user.teacherId!));
+      .innerJoin(classes, and(eq(classes.id, classSubjects.classId), eq(classes.schoolId, schoolId)))
+      .where(and(eq(classSubjects.teacherId, user.teacherId!), eq(classSubjects.schoolId, schoolId)));
     myClasses = rows.filter((r, i) => rows.findIndex((x) => x.id === r.id) === i);
   }
 

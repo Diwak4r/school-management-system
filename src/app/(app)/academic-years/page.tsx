@@ -1,7 +1,8 @@
-import { eq, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { academicYears, enrollments, examinations } from "@/db/schema";
 import { requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Badge, FormModal, ModalCancel, Field, ConfirmButton, Icon, Empty } from "@/components/ui";
 
@@ -10,11 +11,12 @@ export const dynamic = "force-dynamic";
 export async function addYear(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const name = String(formData.get("name") ?? "").trim();
   if (!name) await flashTo("/academic-years", "Year name is required (e.g. 2083/2084).", true);
-  const exists = await db.select().from(academicYears).where(eq(academicYears.name, name)).limit(1);
+  const exists = await db.select().from(academicYears).where(and(eq(academicYears.name, name), eq(academicYears.schoolId, schoolId))).limit(1);
   if (exists.length > 0) await flashTo("/academic-years", `${name} already exists.`, true);
-  await db.insert(academicYears).values({ name, status: "archived" });
+  await db.insert(academicYears).values({ name, status: "archived", schoolId });
   await logAudit(user.id, "Created academic year", "year", undefined, name);
   await flashTo("/academic-years", `${name} created (archived until activated).`);
 }
@@ -22,10 +24,11 @@ export async function addYear(formData: FormData) {
 export async function setActiveYear(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  const [row] = await db.select().from(academicYears).where(eq(academicYears.id, id)).limit(1);
-  await db.update(academicYears).set({ status: "archived" }).where(sql`status = 'active'`);
-  await db.update(academicYears).set({ status: "active" }).where(eq(academicYears.id, id));
+  const [row] = await db.select().from(academicYears).where(and(eq(academicYears.id, id), eq(academicYears.schoolId, schoolId))).limit(1);
+  await db.update(academicYears).set({ status: "archived" }).where(and(sql`status = 'active'`, eq(academicYears.schoolId, schoolId)));
+  await db.update(academicYears).set({ status: "active" }).where(and(eq(academicYears.id, id), eq(academicYears.schoolId, schoolId)));
   await logAudit(user.id, "Set active academic year", "year", id, row?.name);
   await flashTo("/academic-years", `${row?.name} is now the active academic year.`);
 }
@@ -33,25 +36,27 @@ export async function setActiveYear(formData: FormData) {
 export async function archiveYear(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  const [row] = await db.select().from(academicYears).where(eq(academicYears.id, id)).limit(1);
+  const [row] = await db.select().from(academicYears).where(and(eq(academicYears.id, id), eq(academicYears.schoolId, schoolId))).limit(1);
   if (!row) return;
-  const count = await db.select({ c: sql<number>`count(*)::int` }).from(enrollments).where(eq(enrollments.academicYearId, id));
+  const count = await db.select({ c: sql<number>`count(*)::int` }).from(enrollments).where(and(eq(enrollments.academicYearId, id), eq(enrollments.schoolId, schoolId)));
   if (row.status === "active") {
     await flashTo("/academic-years", "Archive the current active year only after promoting students to the next year.", true);
     return;
   }
-  await db.update(academicYears).set({ status: "archived" }).where(eq(academicYears.id, id));
+  await db.update(academicYears).set({ status: "archived" }).where(and(eq(academicYears.id, id), eq(academicYears.schoolId, schoolId)));
   await logAudit(user.id, "Archived academic year", "year", id, `${row.name} (${count[0].c} enrolments preserved)`);
   await flashTo("/academic-years", `${row.name} archived. All ${count[0].c} records preserved for history.`);
 }
 
 export default async function AcademicYearsPage() {
   await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const [yearsList, enrRows, examRows] = await Promise.all([
-    db.select().from(academicYears).orderBy(desc(academicYears.id)),
-    db.select({ yearId: enrollments.academicYearId, status: enrollments.status }).from(enrollments),
-    db.select({ yearId: examinations.academicYearId }).from(examinations),
+    db.select().from(academicYears).where(eq(academicYears.schoolId, schoolId)).orderBy(desc(academicYears.id)),
+    db.select({ yearId: enrollments.academicYearId, status: enrollments.status }).from(enrollments).where(eq(enrollments.schoolId, schoolId)),
+    db.select({ yearId: examinations.academicYearId }).from(examinations).where(eq(examinations.schoolId, schoolId)),
   ]);
   const years = yearsList.map((y) => ({
     y,

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLogs, sessions, settings, users } from "@/db/schema";
+import { auditLogs, schools, sessions, settings, users } from "@/db/schema";
 import { Avatar, Badge, Empty, Icon, PageHead, Stat } from "@/components/ui";
 import { DEFAULT_SCHOOL } from "@/lib/grading";
 import { getPlatformAdminUser } from "@/lib/platform-auth";
@@ -27,10 +27,14 @@ const roleTone: Record<string, string> = {
 };
 
 export default async function SuperAdminOverview() {
-  const [countResult, recentUsers, recentActivity, settingRows, owner] =
+  const [countResult, recentUsers, recentActivity, settingRows, schoolRows, owner] =
     await Promise.all([
       db.execute(sql`
         select
+          (select count(*) from schools)::int as schools,
+          (select count(*) from schools where status = 'active')::int as active_schools,
+          (select count(*) from schools where status <> 'active')::int as inactive_schools,
+          (select count(*) from schools where approval_status = 'pending')::int as pending_schools,
           (select count(*) from users)::int as total_users,
           (select count(*) from users where role = 'admin')::int as admins,
           (select count(*) from users where role = 'teacher')::int as teachers,
@@ -66,6 +70,7 @@ export default async function SuperAdminOverview() {
         .orderBy(desc(auditLogs.createdAt))
         .limit(8),
       db.select().from(settings),
+      db.select().from(schools),
       getPlatformAdminUser(),
     ]);
 
@@ -77,12 +82,13 @@ export default async function SuperAdminOverview() {
   const settingMap = Object.fromEntries(
     settingRows.map((row) => [row.key, row.value ?? ""]),
   );
-  const registeredSchools = settingMap["school_name"] ? 1 : 0;
-  const schoolName = settingMap["school_name"] || DEFAULT_SCHOOL.name;
-  const schoolAddress = settingMap["school_address"] || DEFAULT_SCHOOL.address;
-  const schoolEmail = settingMap["school_email"] || DEFAULT_SCHOOL.email;
-  const schoolContact = settingMap["school_contact"] || DEFAULT_SCHOOL.contact;
-  const principal = settingMap["principal_name"] || "Not recorded";
+  const currentSchool =
+    schoolRows.find((school) => school.id === owner?.schoolId) ?? schoolRows[0];
+  const schoolName = currentSchool?.name || settingMap["school_name"] || DEFAULT_SCHOOL.name;
+  const schoolAddress = currentSchool?.address || settingMap["school_address"] || DEFAULT_SCHOOL.address;
+  const schoolEmail = currentSchool?.contactEmail || settingMap["school_email"] || DEFAULT_SCHOOL.email;
+  const schoolContact = currentSchool?.phone || settingMap["school_contact"] || DEFAULT_SCHOOL.contact;
+  const principal = currentSchool?.principalName || settingMap["principal_name"] || "Not recorded";
 
   const roleBreakdown = [
     { label: "School admins", value: number(counts.admins), tone: "bg-forest" },
@@ -108,10 +114,10 @@ export default async function SuperAdminOverview() {
           <Icon name="cap" className="w-4 h-4" /> Schools
         </div>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat label="Registered schools" value={registeredSchools} sub="Single-school installation" icon="cap" />
-          <Stat label="Active schools" value={registeredSchools} sub="Currently serving records" icon="check" />
-          <Stat label="Inactive schools" value={0} sub="None recorded" icon="lock" tone="amber" />
-          <Stat label="Pending approvals" value={0} sub="No approval queue yet" icon="clock" tone="amber" />
+          <Stat label="Registered schools" value={number(counts.schools)} sub="Tenant registry" icon="cap" />
+          <Stat label="Active schools" value={number(counts.active_schools)} sub="Approved and serving" icon="check" />
+          <Stat label="Inactive or suspended" value={number(counts.inactive_schools)} sub="Not serving records" icon="lock" tone="amber" />
+          <Stat label="Pending approvals" value={number(counts.pending_schools)} sub="Awaiting platform review" icon="clock" tone="amber" />
         </div>
       </section>
 
@@ -214,7 +220,7 @@ export default async function SuperAdminOverview() {
 
           <section className="card p-4">
             <h2 className="font-display text-base font-semibold text-ink">Current school</h2>
-            <p className="mt-0.5 text-xs text-muted">Loaded from existing school settings</p>
+            <p className="mt-0.5 text-xs text-muted">Loaded from the tenant registry</p>
             <dl className="mt-4 divide-y divide-linesoft text-sm">
               <div className="flex justify-between gap-3 py-2"><dt className="text-muted">Name</dt><dd className="text-right font-semibold text-ink">{schoolName}</dd></div>
               <div className="flex justify-between gap-3 py-2"><dt className="text-muted">Principal</dt><dd className="text-right font-semibold text-ink">{principal}</dd></div>
@@ -266,7 +272,7 @@ export default async function SuperAdminOverview() {
               <span>Existing school records</span><Badge tone="green">Preserved</Badge>
             </li>
             <li className="flex items-center justify-between gap-3 py-3">
-              <span>Tenant registry and isolation</span><Badge tone="amber">Pending migration</Badge>
+              <span>Tenant registry</span><Badge tone="green">Active</Badge>
             </li>
             <li className="flex items-center justify-between gap-3 py-3">
               <span>Subscription billing</span><Badge tone="gray">Not integrated</Badge>

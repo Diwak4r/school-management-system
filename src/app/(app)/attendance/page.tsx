@@ -3,6 +3,7 @@ import { eq, and, sql, desc, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { students, enrollments, classes, sections, attendance, classSubjects, parentChildren, academicYears } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { attendancePct, fmtDate, todayStr, addDays, dateStr, getSchool } from "@/lib/grading";
 import { PageHead, Badge, Donut, Icon, Empty, Field } from "@/components/ui";
@@ -18,6 +19,7 @@ export async function markAttendance(formData: FormData) {
     await flashTo("/dashboard", "You are not allowed to mark attendance.", true);
     return;
   }
+  const schoolId = await currentSchoolId();
   const classId = Number(formData.get("classId"));
   const sectionId = formData.get("sectionId") ? Number(formData.get("sectionId")) : null;
   const date = String(formData.get("date") ?? "").slice(0, 10);
@@ -25,7 +27,10 @@ export async function markAttendance(formData: FormData) {
 
   // teachers can only mark their assigned classes
   if (user.role === "teacher") {
-    const mine = await db.select().from(classSubjects).where(eq(classSubjects.teacherId, user.teacherId!));
+    const mine = await db
+      .select()
+      .from(classSubjects)
+      .where(and(eq(classSubjects.teacherId, user.teacherId!), eq(classSubjects.schoolId, schoolId)));
     if (!mine.some((m) => m.classId === classId)) {
       await flashTo("/attendance", "You can only mark attendance for your assigned classes.", true);
       return;
@@ -37,8 +42,8 @@ export async function markAttendance(formData: FormData) {
     .from(enrollments)
     .where(
       sectionId
-        ? and(eq(enrollments.classId, classId), eq(enrollments.sectionId, sectionId), eq(enrollments.status, "active"))
-        : and(eq(enrollments.classId, classId), eq(enrollments.status, "active")),
+        ? and(eq(enrollments.classId, classId), eq(enrollments.sectionId, sectionId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId))
+        : and(eq(enrollments.classId, classId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)),
     );
 
   let n = 0;
@@ -47,7 +52,7 @@ export async function markAttendance(formData: FormData) {
     if (!["P", "A", "L", "LV"].includes(status)) continue;
     await db
       .insert(attendance)
-      .values({ studentId: r.id, attDate: date, status, markedById: user.id })
+      .values({ studentId: r.id, attDate: date, status, markedById: user.id, schoolId })
       .onConflictDoUpdate({
         target: [attendance.studentId, attendance.attDate],
         set: { status, markedById: user.id },
@@ -75,16 +80,17 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
 /* ------------------------------ Teacher register ----------------------------- */
 
 async function Register({ classId, sectionId, date, user }: { classId: number | null; sectionId: number | null; date: string; mode: string; user: any }) {
+  const schoolId = await currentSchoolId();
   const isAdmin = user.role === "admin";
   const [allClasses, allSections, myClasses] = await Promise.all([
-    db.select().from(classes).orderBy(classes.sortOrder),
-    db.select().from(sections).orderBy(sections.name),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
+    db.select().from(sections).where(eq(sections.schoolId, schoolId)).orderBy(sections.name),
     user.role === "teacher"
       ? db
           .select({ classId: classSubjects.classId, class: classes.name })
           .from(classSubjects)
           .innerJoin(classes, eq(classes.id, classSubjects.classId))
-          .where(eq(classSubjects.teacherId, user.teacherId))
+          .where(and(eq(classSubjects.teacherId, user.teacherId), eq(classSubjects.schoolId, schoolId)))
       : Promise.resolve([]),
   ]);
 
@@ -94,7 +100,7 @@ async function Register({ classId, sectionId, date, user }: { classId: number | 
   const effSection = sectionId ?? effSections[0]?.id ?? null;
 
   const [existing, roster] = await Promise.all([
-    db.select().from(attendance).where(eq(attendance.attDate, date)),
+    db.select().from(attendance).where(and(eq(attendance.attDate, date), eq(attendance.schoolId, schoolId))),
     db
       .select({ student: students, rollNo: enrollments.rollNo })
       .from(enrollments)
@@ -104,6 +110,7 @@ async function Register({ classId, sectionId, date, user }: { classId: number | 
           eq(enrollments.classId, effClass ?? -1),
           effSection ? eq(enrollments.sectionId, effSection) : sql`true`,
           eq(enrollments.status, "active"),
+          eq(enrollments.schoolId, schoolId),
         ),
       )
       .orderBy(enrollments.rollNo),
@@ -207,10 +214,11 @@ async function Register({ classId, sectionId, date, user }: { classId: number | 
 
 async function Report({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const [allClasses, allSections, activeYear] = await Promise.all([
-    db.select().from(classes).orderBy(classes.sortOrder),
-    db.select().from(sections).orderBy(sections.name),
-    db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
+    db.select().from(sections).where(eq(sections.schoolId, schoolId)).orderBy(sections.name),
+    db.select().from(academicYears).where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId))).limit(1),
   ]);
   const effClass = searchParams.classId ? Number(searchParams.classId) : allClasses[allClasses.length - 1]?.id ?? null;
   const effSections = allSections.filter((s) => s.classId === effClass);
@@ -220,7 +228,7 @@ async function Report({ searchParams }: { searchParams: Record<string, string | 
     .select({ student: students, rollNo: enrollments.rollNo })
     .from(enrollments)
     .innerJoin(students, eq(students.id, enrollments.studentId))
-    .where(and(eq(enrollments.classId, effClass ?? -1), effSection ? eq(enrollments.sectionId, effSection) : sql`true`, eq(enrollments.status, "active")))
+    .where(and(eq(enrollments.classId, effClass ?? -1), effSection ? eq(enrollments.sectionId, effSection) : sql`true`, eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)))
     .orderBy(enrollments.rollNo);
 
   const fromParam = String(searchParams.from ?? "");
@@ -327,9 +335,10 @@ async function Report({ searchParams }: { searchParams: Record<string, string | 
 /* --------------------------------- Student ---------------------------------- */
 
 async function Mine({ studentId }: { studentId: number }) {
+  const schoolId = await currentSchoolId();
   const att = await attendancePct(studentId);
   const school = await getSchool();
-  const recent = await db.select().from(attendance).where(eq(attendance.studentId, studentId)).orderBy(desc(attendance.attDate)).limit(60);
+  const recent = await db.select().from(attendance).where(and(eq(attendance.studentId, studentId), eq(attendance.schoolId, schoolId))).orderBy(desc(attendance.attDate)).limit(60);
 
   return (
     <>
@@ -375,11 +384,12 @@ async function Mine({ studentId }: { studentId: number }) {
 /* ---------------------------------- Parent ---------------------------------- */
 
 async function ChildView({ userId, initialChild }: { userId: number; initialChild: number | null }) {
+  const schoolId = await currentSchoolId();
   const children = await db
     .select({ id: students.id, name: students.name })
     .from(parentChildren)
     .innerJoin(students, eq(students.id, parentChildren.studentId))
-    .where(eq(parentChildren.userId, userId));
+    .where(and(eq(parentChildren.userId, userId), eq(parentChildren.schoolId, schoolId)));
   if (children.length === 0) {
     return (
       <>
@@ -409,12 +419,13 @@ async function ChildView({ userId, initialChild }: { userId: number; initialChil
 }
 
 async function ChildAttendance({ studentId }: { studentId: number }) {
+  const schoolId = await currentSchoolId();
   const [child, school] = await Promise.all([
-    db.select().from(students).where(eq(students.id, studentId)).limit(1),
+    db.select().from(students).where(and(eq(students.id, studentId), eq(students.schoolId, schoolId))).limit(1),
     getSchool(),
   ]);
   const att = await attendancePct(studentId);
-  const recent = await db.select().from(attendance).where(eq(attendance.studentId, studentId)).orderBy(desc(attendance.attDate)).limit(30);
+  const recent = await db.select().from(attendance).where(and(eq(attendance.studentId, studentId), eq(attendance.schoolId, schoolId))).orderBy(desc(attendance.attDate)).limit(30);
   return (
     <div className="grid md:grid-cols-3 gap-3.5">
       <div className="card p-5 flex flex-col items-center">

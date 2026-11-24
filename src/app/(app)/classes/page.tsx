@@ -2,6 +2,7 @@ import { eq, and, sql, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { classes, sections, subjects, teachers, classSubjects, enrollments } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Badge, Icon, ConfirmButton, Field, Empty } from "@/components/ui";
 
@@ -12,13 +13,14 @@ export const dynamic = "force-dynamic";
 export async function addSection(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const classId = Number(formData.get("classId"));
   const name = String(formData.get("name") ?? "").trim().toUpperCase();
   if (!name) await flashTo("/classes", "Section name is required.", true);
-  const [c] = await db.select().from(classes).where(eq(classes.id, classId)).limit(1);
-  const exists = await db.select().from(sections).where(and(eq(sections.classId, classId), eq(sections.name, name))).limit(1);
+  const [c] = await db.select().from(classes).where(and(eq(classes.id, classId), eq(classes.schoolId, schoolId))).limit(1);
+  const exists = await db.select().from(sections).where(and(eq(sections.classId, classId), eq(sections.name, name), eq(sections.schoolId, schoolId))).limit(1);
   if (exists.length > 0) await flashTo("/classes", `Section ${name} already exists in ${c?.name}.`, true);
-  await db.insert(sections).values({ classId, name });
+  await db.insert(sections).values({ classId, name, schoolId });
   await logAudit(user.id, "Added section", "section", undefined, `${c?.name} – ${name}`);
   await flashTo("/classes", `Section ${name} added to ${c?.name}.`);
 }
@@ -26,12 +28,13 @@ export async function addSection(formData: FormData) {
 export async function deleteSection(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  const [sec] = await db.select().from(sections).where(eq(sections.id, id)).limit(1);
+  const [sec] = await db.select().from(sections).where(and(eq(sections.id, id), eq(sections.schoolId, schoolId))).limit(1);
   if (!sec) return;
-  const count = await db.select({ c: sql<number>`count(*)::int` }).from(enrollments).where(and(eq(enrollments.sectionId, id), eq(enrollments.status, "active")));
+  const count = await db.select({ c: sql<number>`count(*)::int` }).from(enrollments).where(and(eq(enrollments.sectionId, id), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId)));
   if (count[0].c > 0) await flashTo("/classes", "This section still has enrolled students. Move them first.", true);
-  await db.delete(sections).where(eq(sections.id, id));
+  await db.delete(sections).where(and(eq(sections.id, id), eq(sections.schoolId, schoolId)));
   await logAudit(user.id, "Removed section", "section", id, sec.name);
   await flashTo("/classes", "Section removed.");
 }
@@ -39,29 +42,30 @@ export async function deleteSection(formData: FormData) {
 export async function saveAssignment(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const classId = Number(formData.get("classId"));
   const subjectId = Number(formData.get("subjectId"));
   const teacherId = formData.get("teacherId") ? Number(formData.get("teacherId")) : null;
   const isClassTeacher = formData.get("isClassTeacher") === "on";
   if (!classId || !subjectId) await flashTo("/classes", "Select a class and subject.", true);
 
-  const existing = await db.select().from(classSubjects).where(and(eq(classSubjects.classId, classId), eq(classSubjects.subjectId, subjectId))).limit(1);
+  const existing = await db.select().from(classSubjects).where(and(eq(classSubjects.classId, classId), eq(classSubjects.subjectId, subjectId), eq(classSubjects.schoolId, schoolId))).limit(1);
   let savedId = existing[0]?.id;
   if (savedId !== undefined) {
-    await db.update(classSubjects).set({ teacherId, isClassTeacher }).where(eq(classSubjects.id, savedId));
+    await db.update(classSubjects).set({ teacherId, isClassTeacher }).where(and(eq(classSubjects.id, savedId), eq(classSubjects.schoolId, schoolId)));
   } else {
     const [inserted] = await db
       .insert(classSubjects)
-      .values({ classId, subjectId, teacherId, isClassTeacher })
+      .values({ classId, subjectId, teacherId, isClassTeacher, schoolId })
       .returning({ id: classSubjects.id });
     savedId = inserted.id;
   }
   if (isClassTeacher) {
     // only one class teacher per class
-    await db.update(classSubjects).set({ isClassTeacher: false }).where(and(eq(classSubjects.classId, classId), sql`${classSubjects.id} != ${savedId}`));
+    await db.update(classSubjects).set({ isClassTeacher: false }).where(and(eq(classSubjects.classId, classId), sql`${classSubjects.id} != ${savedId}`, eq(classSubjects.schoolId, schoolId)));
   }
-  const [c] = await db.select().from(classes).where(eq(classes.id, classId)).limit(1);
-  const [sb] = await db.select().from(subjects).where(eq(subjects.id, subjectId)).limit(1);
+  const [c] = await db.select().from(classes).where(and(eq(classes.id, classId), eq(classes.schoolId, schoolId))).limit(1);
+  const [sb] = await db.select().from(subjects).where(and(eq(subjects.id, subjectId), eq(subjects.schoolId, schoolId))).limit(1);
   await logAudit(user.id, "Saved subject assignment", "classSubject", undefined, `${c?.name}: ${sb?.name}${teacherId ? " → teacher assigned" : ""}`);
   await flashTo("/classes?classId=" + classId, `Assignment saved for ${sb?.name} (${c?.name}).`);
 }
@@ -69,9 +73,10 @@ export async function saveAssignment(formData: FormData) {
 export async function removeAssignment(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
   const classId = Number(formData.get("classId") || 0);
-  await db.delete(classSubjects).where(eq(classSubjects.id, id));
+  await db.delete(classSubjects).where(and(eq(classSubjects.id, id), eq(classSubjects.schoolId, schoolId)));
   await logAudit(user.id, "Removed subject assignment", "classSubject", id);
   await flashTo("/classes?classId=" + classId, "Assignment removed.");
 }
@@ -79,12 +84,13 @@ export async function removeAssignment(formData: FormData) {
 export async function setClassTeacher(formData: FormData) {
   "use server";
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
   const classId = Number(formData.get("classId"));
-  const row = (await db.select().from(classSubjects).where(eq(classSubjects.id, id)).limit(1))[0];
+  const row = (await db.select().from(classSubjects).where(and(eq(classSubjects.id, id), eq(classSubjects.schoolId, schoolId))).limit(1))[0];
   if (!row) return;
-  await db.update(classSubjects).set({ isClassTeacher: false }).where(eq(classSubjects.classId, classId));
-  await db.update(classSubjects).set({ isClassTeacher: true }).where(eq(classSubjects.id, id));
+  await db.update(classSubjects).set({ isClassTeacher: false }).where(and(eq(classSubjects.classId, classId), eq(classSubjects.schoolId, schoolId)));
+  await db.update(classSubjects).set({ isClassTeacher: true }).where(and(eq(classSubjects.id, id), eq(classSubjects.schoolId, schoolId)));
   await logAudit(user.id, "Set class teacher", "classSubject", id);
   await flashTo("/classes?classId=" + classId, "Class teacher updated.");
 }
@@ -93,20 +99,22 @@ export async function setClassTeacher(formData: FormData) {
 
 export default async function ClassesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   const isAdmin = user.role === "admin";
   const sp = await searchParams;
   const selClass = sp.classId ? Number(sp.classId) : null;
 
   const [classesList, allSubjects, allTeachers, allSectionsRaw, activeEnr, csRows] = await Promise.all([
-    db.select().from(classes).orderBy(classes.sortOrder),
-    db.select().from(subjects).orderBy(subjects.name),
-    db.select().from(teachers).where(eq(teachers.status, "active")).orderBy(teachers.name),
-    db.select().from(sections),
-    db.select({ classId: enrollments.classId }).from(enrollments).where(eq(enrollments.status, "active")),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
+    db.select().from(subjects).where(eq(subjects.schoolId, schoolId)).orderBy(subjects.name),
+    db.select().from(teachers).where(and(eq(teachers.status, "active"), eq(teachers.schoolId, schoolId))).orderBy(teachers.name),
+    db.select().from(sections).where(eq(sections.schoolId, schoolId)),
+    db.select({ classId: enrollments.classId }).from(enrollments).where(and(eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId))),
     db
       .select({ classId: classSubjects.classId, teacherName: teachers.name, isCT: classSubjects.isClassTeacher })
       .from(classSubjects)
-      .leftJoin(teachers, eq(teachers.id, classSubjects.teacherId)),
+      .leftJoin(teachers, and(eq(teachers.id, classSubjects.teacherId), eq(teachers.schoolId, schoolId)))
+      .where(eq(classSubjects.schoolId, schoolId)),
   ]);
   const classRows = classesList.map((c) => ({
     c,
@@ -126,9 +134,9 @@ export default async function ClassesPage({ searchParams }: { searchParams: Prom
           isClassTeacher: classSubjects.isClassTeacher,
         })
         .from(classSubjects)
-        .innerJoin(subjects, eq(subjects.id, classSubjects.subjectId))
-        .leftJoin(teachers, eq(teachers.id, classSubjects.teacherId))
-        .where(eq(classSubjects.classId, selClass))
+        .innerJoin(subjects, and(eq(subjects.id, classSubjects.subjectId), eq(subjects.schoolId, schoolId)))
+        .leftJoin(teachers, and(eq(teachers.id, classSubjects.teacherId), eq(teachers.schoolId, schoolId)))
+        .where(and(eq(classSubjects.classId, selClass), eq(classSubjects.schoolId, schoolId)))
         .orderBy(subjects.name)
     : [];
 
@@ -253,7 +261,8 @@ export default async function ClassesPage({ searchParams }: { searchParams: Prom
 }
 
 async function SectionManager({ classId }: { classId: number }) {
-  const list = await db.select().from(sections).where(eq(sections.classId, classId)).orderBy(sections.name);
+  const schoolId = await currentSchoolId();
+  const list = await db.select().from(sections).where(and(eq(sections.classId, classId), eq(sections.schoolId, schoolId))).orderBy(sections.name);
   const user = await requireUser();
   const isAdmin = user.role === "admin";
   return (

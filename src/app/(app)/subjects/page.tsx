@@ -2,6 +2,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { subjects, classSubjects, examSubjects } from "@/db/schema";
 import { requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { PageHead, Field } from "@/components/ui";
 
@@ -13,6 +14,7 @@ export async function addSubject(formData: FormData) {
   "use server";
 
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
 
   const name = String(formData.get("name") ?? "").trim();
   const code = String(formData.get("code") ?? "").trim().toUpperCase();
@@ -28,7 +30,7 @@ export async function addSubject(formData: FormData) {
   const duplicateName = await db
     .select({ id: subjects.id })
     .from(subjects)
-    .where(eq(subjects.name, name))
+    .where(and(eq(subjects.name, name), eq(subjects.schoolId, schoolId)))
     .limit(1);
 
   if (duplicateName.length > 0) {
@@ -38,7 +40,7 @@ export async function addSubject(formData: FormData) {
   const duplicateCode = await db
     .select({ id: subjects.id })
     .from(subjects)
-    .where(eq(subjects.code, code))
+    .where(and(eq(subjects.code, code), eq(subjects.schoolId, schoolId)))
     .limit(1);
 
   if (duplicateCode.length > 0) {
@@ -47,7 +49,7 @@ export async function addSubject(formData: FormData) {
 
   const [created] = await db
     .insert(subjects)
-    .values({ name, code })
+    .values({ name, code, schoolId })
     .returning({ id: subjects.id });
 
   await logAudit(user.id, "Added subject", "subject", created.id, name);
@@ -61,6 +63,7 @@ export async function updateSubject(formData: FormData) {
   "use server";
 
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
 
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") ?? "").trim();
@@ -80,7 +83,8 @@ export async function updateSubject(formData: FormData) {
     .where(
       and(
         eq(subjects.name, name),
-        sql`${subjects.id} != ${id}`
+        sql`${subjects.id} != ${id}`,
+        eq(subjects.schoolId, schoolId)
       )
     )
     .limit(1);
@@ -95,7 +99,8 @@ export async function updateSubject(formData: FormData) {
     .where(
       and(
         eq(subjects.code, code),
-        sql`${subjects.id} != ${id}`
+        sql`${subjects.id} != ${id}`,
+        eq(subjects.schoolId, schoolId)
       )
     )
     .limit(1);
@@ -107,7 +112,7 @@ export async function updateSubject(formData: FormData) {
   await db
     .update(subjects)
     .set({ name, code })
-    .where(eq(subjects.id, id));
+    .where(and(eq(subjects.id, id), eq(subjects.schoolId, schoolId)));
 
   await logAudit(user.id, "Updated subject", "subject", id, name);
 
@@ -120,6 +125,7 @@ export async function deleteSubject(formData: FormData) {
   "use server";
 
   const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
 
   if (!Number.isInteger(id) || id <= 0) {
@@ -129,7 +135,7 @@ export async function deleteSubject(formData: FormData) {
   const [subject] = await db
     .select()
     .from(subjects)
-    .where(eq(subjects.id, id))
+    .where(and(eq(subjects.id, id), eq(subjects.schoolId, schoolId)))
     .limit(1);
 
   if (!subject) {
@@ -139,7 +145,7 @@ export async function deleteSubject(formData: FormData) {
   const [assignment] = await db
     .select({ id: classSubjects.id })
     .from(classSubjects)
-    .where(eq(classSubjects.subjectId, id))
+    .where(and(eq(classSubjects.subjectId, id), eq(classSubjects.schoolId, schoolId)))
     .limit(1);
 
   if (assignment) {
@@ -153,7 +159,7 @@ export async function deleteSubject(formData: FormData) {
   const [examSubject] = await db
     .select({ id: examSubjects.id })
     .from(examSubjects)
-    .where(eq(examSubjects.subjectId, id))
+    .where(and(eq(examSubjects.subjectId, id), eq(examSubjects.schoolId, schoolId)))
     .limit(1);
 
   if (examSubject) {
@@ -164,7 +170,7 @@ export async function deleteSubject(formData: FormData) {
     );
   }
 
-  await db.delete(subjects).where(eq(subjects.id, id));
+  await db.delete(subjects).where(and(eq(subjects.id, id), eq(subjects.schoolId, schoolId)));
 
   await logAudit(user.id, "Deleted subject", "subject", id, subject.name);
 
@@ -175,10 +181,12 @@ export async function deleteSubject(formData: FormData) {
 
 export default async function SubjectsPage() {
   await requireRole("admin");
+  const schoolId = await currentSchoolId();
 
   const subjectList = await db
     .select()
     .from(subjects)
+    .where(eq(subjects.schoolId, schoolId))
     .orderBy(subjects.name);
 
   return (

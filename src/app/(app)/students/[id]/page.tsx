@@ -4,6 +4,7 @@ import { eq, and, desc, sql, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { students, enrollments, classes, sections, academicYears, attendance, examinations, examSubjects, notes, parentChildren, subjects, feeInvoices, feePayments } from "@/db/schema";
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
 import { attendancePct, computeClassResults, fmtDate, getScale } from "@/lib/grading";
 import { PageHead, Badge, Donut, Icon, Empty, FormModal, ModalCancel, ConfirmButton } from "@/components/ui";
@@ -15,15 +16,16 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const { id } = await params;
   const studentId = Number(id);
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
 
   if (user.role === "student" && user.studentId !== studentId) redirect("/dashboard");
   if (user.role === "parent") {
-    const link = await db.select().from(parentChildren).where(and(eq(parentChildren.userId, user.id), eq(parentChildren.studentId, studentId))).limit(1);
+    const link = await db.select().from(parentChildren).where(and(eq(parentChildren.userId, user.id), eq(parentChildren.studentId, studentId), eq(parentChildren.schoolId, schoolId))).limit(1);
     if (link.length === 0) redirect("/dashboard");
   }
   const canEdit = user.role === "admin";
 
-  const [studentRow] = await db.select().from(students).where(and(eq(students.id, studentId), isNull(students.deletedAt))).limit(1);
+  const [studentRow] = await db.select().from(students).where(and(eq(students.id, studentId), isNull(students.deletedAt), eq(students.schoolId, schoolId))).limit(1);
   if (!studentRow) notFound();
   const st = studentRow;
 
@@ -41,21 +43,21 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
         admissionDate: enrollments.admissionDate,
       })
       .from(enrollments)
-      .innerJoin(classes, eq(classes.id, enrollments.classId))
-      .leftJoin(sections, eq(sections.id, enrollments.sectionId))
-      .innerJoin(academicYears, eq(academicYears.id, enrollments.academicYearId))
-      .where(eq(enrollments.studentId, studentId))
+      .innerJoin(classes, and(eq(classes.id, enrollments.classId), eq(classes.schoolId, schoolId)))
+      .leftJoin(sections, and(eq(sections.id, enrollments.sectionId), eq(sections.schoolId, schoolId)))
+      .innerJoin(academicYears, and(eq(academicYears.id, enrollments.academicYearId), eq(academicYears.schoolId, schoolId)))
+      .where(and(eq(enrollments.studentId, studentId), eq(enrollments.schoolId, schoolId)))
       .orderBy(desc(enrollments.createdAt)),
-    db.select().from(classes).orderBy(classes.sortOrder),
-    db.select().from(sections),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
+    db.select().from(sections).where(eq(sections.schoolId, schoolId)),
     db
       .select({ title: notes.title, subject: subjects.name, created: notes.createdAt, type: notes.type, url: notes.url, fileName: notes.fileName, noteId: notes.id })
       .from(notes)
-      .leftJoin(subjects, eq(subjects.id, notes.subjectId))
-      .where(sql`${notes.classId} in (select class_id from enrollments where student_id = ${studentId} and status = 'active')`)
+      .leftJoin(subjects, and(eq(subjects.id, notes.subjectId), eq(subjects.schoolId, schoolId)))
+      .where(and(sql`${notes.classId} in (select class_id from enrollments where student_id = ${studentId} and status = 'active')`, eq(notes.schoolId, schoolId)))
       .orderBy(desc(notes.createdAt))
       .limit(5),
-    db.select().from(attendance).where(eq(attendance.studentId, studentId)).orderBy(desc(attendance.attDate)).limit(14),
+    db.select().from(attendance).where(and(eq(attendance.studentId, studentId), eq(attendance.schoolId, schoolId))).orderBy(desc(attendance.attDate)).limit(14),
   ]);
 
   const active = enrollmentsAll.find((e) => e.status === "active");
@@ -65,12 +67,12 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   // published exams for the student's active class
   let resultRows: { examName: string; endDate: string; examId: number; gpa: string; pct: number | null; status: string }[] = [];
   if (active) {
-    const activeClassId = (await db.select().from(enrollments).where(and(eq(enrollments.studentId, studentId), eq(enrollments.status, "active"))).limit(1))[0]?.classId;
+    const activeClassId = (await db.select().from(enrollments).where(and(eq(enrollments.studentId, studentId), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId))).limit(1))[0]?.classId;
     if (activeClassId) {
       const exams = await db
         .select({ name: examinations.name, id: examinations.id, endDate: examinations.endDate })
         .from(examinations)
-        .where(and(eq(examinations.status, "published"), sql`${examinations.id} in (select exam_id from exam_subjects where class_id = ${activeClassId})`))
+        .where(and(eq(examinations.status, "published"), sql`${examinations.id} in (select exam_id from exam_subjects where class_id = ${activeClassId})`, eq(examinations.schoolId, schoolId)))
         .orderBy(desc(examinations.endDate))
         .limit(6);
       for (const e of exams) {
@@ -94,7 +96,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
   const feeInvoiceRows = await db
     .select()
     .from(feeInvoices)
-    .where(eq(feeInvoices.studentId, studentId))
+    .where(and(eq(feeInvoices.studentId, studentId), eq(feeInvoices.schoolId, schoolId)))
     .orderBy(desc(feeInvoices.createdAt));
 
   const feeInvoiceIds = feeInvoiceRows.map((invoice) => invoice.id);
@@ -103,7 +105,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
     ? await db
         .select()
         .from(feePayments)
-        .where(inArray(feePayments.invoiceId, feeInvoiceIds))
+        .where(and(inArray(feePayments.invoiceId, feeInvoiceIds), eq(feePayments.schoolId, schoolId)))
         .orderBy(desc(feePayments.paidAt))
     : [];
 

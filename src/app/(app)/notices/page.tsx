@@ -4,6 +4,7 @@ import { notices, classes, sections, users, enrollments, classSubjects, parentCh
 import { requireUser, logAudit } from "@/lib/auth";
 import { flashTo } from "@/actions/auth";
 import { fmtDate } from "@/lib/grading";
+import { currentSchoolId } from "@/lib/tenant";
 import { PageHead, Badge, FormModal, ModalCancel, Field, ConfirmButton, Icon, Empty } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ export async function publishNotice(formData: FormData) {
   "use server";
   const user = await requireUser();
   if (user.role === "student" || user.role === "parent") await flashTo("/dashboard", "Not permitted.", true);
+  const schoolId = await currentSchoolId();
   const title = String(formData.get("title") ?? "").trim();
   const body = String(formData.get("body") ?? "").trim();
   const priority = String(formData.get("priority") ?? "normal");
@@ -21,11 +23,11 @@ export async function publishNotice(formData: FormData) {
   if (!title || !body) await flashTo("/notices", "Title and description are required.", true);
 
   if (user.role === "teacher" && classId) {
-    const mine = await db.select().from(classSubjects).where(eq(classSubjects.teacherId, user.teacherId!));
+    const mine = await db.select().from(classSubjects).where(and(eq(classSubjects.teacherId, user.teacherId!), eq(classSubjects.schoolId, schoolId)));
     if (!mine.some((m) => m.classId === classId)) await flashTo("/notices", "You can only post notices for your assigned classes.", true);
   }
 
-  const [row] = await db.insert(notices).values({ title, body, priority, classId, sectionId, publishedById: user.id, expiresAt }).returning({ id: notices.id });
+  const [row] = await db.insert(notices).values({ schoolId, title, body, priority, classId, sectionId, publishedById: user.id, expiresAt }).returning({ id: notices.id });
   await logAudit(user.id, "Published notice", "notice", row.id, title);
   await flashTo("/notices", "Notice published. Students and parents in scope will see it immediately.");
 }
@@ -34,48 +36,50 @@ export async function deleteNotice(formData: FormData) {
   "use server";
   const user = await requireUser();
   if (user.role !== "admin") await flashTo("/notices", "Only administrators can delete notices.", true);
+  const schoolId = await currentSchoolId();
   const id = Number(formData.get("id"));
-  await db.delete(notices).where(eq(notices.id, id));
+  await db.delete(notices).where(and(eq(notices.id, id), eq(notices.schoolId, schoolId)));
   await logAudit(user.id, "Deleted notice", "notice", id);
   await flashTo("/notices", "Notice deleted.");
 }
 
 export default async function NoticesPage() {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   const isAdmin = user.role === "admin";
   const canPublish = user.role === "admin" || user.role === "teacher";
   const now = new Date();
   const cutoff = new Date(now.getTime() - 3 * 86400_000);
 
-  let where: any = sql`true`;
+  let where: any = sql`${notices.schoolId} = ${schoolId}`;
   if (user.role === "student") {
-    where = sql`${notices.classId} is null or ${notices.classId} in (select class_id from enrollments where student_id = ${user.studentId} and status = 'active')`;
+    where = sql`${notices.schoolId} = ${schoolId} and (${notices.classId} is null or ${notices.classId} in (select class_id from enrollments where student_id = ${user.studentId} and school_id = ${schoolId} and status = 'active'))`;
   } else if (user.role === "parent") {
-    where = sql`${notices.classId} is null or ${notices.classId} in (select class_id from enrollments where student_id in (select student_id from parent_children where user_id = ${user.id}) and status = 'active')`;
+    where = sql`${notices.schoolId} = ${schoolId} and (${notices.classId} is null or ${notices.classId} in (select class_id from enrollments where student_id in (select student_id from parent_children where user_id = ${user.id} and school_id = ${schoolId}) and school_id = ${schoolId} and status = 'active'))`;
   } else if (user.role === "teacher") {
-    where = sql`(${notices.classId} is null or ${notices.classId} in (select class_id from class_subjects where teacher_id = ${user.teacherId}) or ${notices.publishedById} = ${user.id})`;
+    where = sql`${notices.schoolId} = ${schoolId} and (${notices.classId} is null or ${notices.classId} in (select class_id from class_subjects where teacher_id = ${user.teacherId} and school_id = ${schoolId}) or ${notices.publishedById} = ${user.id})`;
   }
 
   const [allClasses, allSections, list] = await Promise.all([
-    db.select().from(classes).orderBy(classes.sortOrder),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
     sectionsQuery(),
     db
       .select({ n: notices, className: classes.name, by: users.name })
       .from(notices)
-      .leftJoin(classes, eq(classes.id, notices.classId))
-      .leftJoin(users, eq(users.id, notices.publishedById))
+      .leftJoin(classes, and(eq(classes.id, notices.classId), eq(classes.schoolId, schoolId)))
+      .leftJoin(users, and(eq(users.id, notices.publishedById), eq(users.schoolId, schoolId)))
       .where(and(where, sql`${notices.expiresAt} is null or ${notices.expiresAt} > ${now.toISOString()}`))
       .orderBy(desc(notices.createdAt))
       .limit(50),
   ]);
 
   async function sectionsQuery() {
-    return db.select().from(sections).orderBy(sections.name);
+    return db.select().from(sections).where(eq(sections.schoolId, schoolId)).orderBy(sections.name);
   }
 
   const myClassIds =
     user.role === "teacher"
-      ? (await db.select().from(classSubjects).where(eq(classSubjects.teacherId, user.teacherId!))).map((r) => r.classId)
+      ? (await db.select().from(classSubjects).where(and(eq(classSubjects.teacherId, user.teacherId!), eq(classSubjects.schoolId, schoolId)))).map((r) => r.classId)
       : [];
 
   return (

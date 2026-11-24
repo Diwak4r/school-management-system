@@ -17,6 +17,7 @@ import {
 } from "@/db/schema";
 import { requireRole } from "@/lib/auth";
 import { computeClassResults, fmtDate, gradeFor, getScale, todayStr, addDays } from "@/lib/grading";
+import { currentSchoolId } from "@/lib/tenant";
 import { PageHead, Badge, Icon, Empty, PrintButton } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -34,13 +35,14 @@ const REPORTS = [
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requireRole("admin");
+  const schoolId = await currentSchoolId();
   const sp = await searchParams;
   const r = sp.r ? String(sp.r) : "students";
-  const scale = await getScale();
+  const scale = await getScale(schoolId);
 
   const [allClasses, activeYear] = await Promise.all([
-    db.select().from(classes).orderBy(classes.sortOrder),
-    db.select().from(academicYears).where(eq(academicYears.status, "active")).limit(1),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
+    db.select().from(academicYears).where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId))).limit(1),
   ]);
   const yearId = activeYear[0]?.id ?? null;
 
@@ -63,10 +65,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         contact: students.contact,
       })
       .from(students)
-      .leftJoin(enrollments, and(eq(enrollments.studentId, students.id), eq(enrollments.status, "active"), yearId ? eq(enrollments.academicYearId, yearId) : sql`false`))
-      .leftJoin(classes, eq(classes.id, enrollments.classId))
-      .leftJoin(sections, eq(sections.id, enrollments.sectionId))
-      .where(sql`${students.deletedAt} is null`)
+      .leftJoin(enrollments, and(eq(enrollments.studentId, students.id), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId), yearId ? eq(enrollments.academicYearId, yearId) : sql`false`))
+      .leftJoin(classes, and(eq(classes.id, enrollments.classId), eq(classes.schoolId, schoolId)))
+      .leftJoin(sections, and(eq(sections.id, enrollments.sectionId), eq(sections.schoolId, schoolId)))
+      .where(and(sql`${students.deletedAt} is null`, eq(students.schoolId, schoolId)))
       .orderBy(students.name)
       .limit(500);
     body = (
@@ -99,6 +101,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           count: sql<number>`count(*)::int`,
         })
         .from(sections)
+        .where(eq(sections.schoolId, schoolId))
         .groupBy(sections.classId),
 
       db
@@ -108,12 +111,15 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         })
         .from(enrollments)
         .where(
-          yearId
-            ? and(
-                eq(enrollments.status, "active"),
-                eq(enrollments.academicYearId, yearId),
-              )
-            : eq(enrollments.status, "active"),
+          and(
+            eq(enrollments.schoolId, schoolId),
+            yearId
+              ? and(
+                  eq(enrollments.status, "active"),
+                  eq(enrollments.academicYearId, yearId),
+                )
+              : eq(enrollments.status, "active"),
+          ),
         )
         .groupBy(enrollments.classId),
 
@@ -123,8 +129,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           name: teachers.name,
         })
         .from(classSubjects)
-        .leftJoin(teachers, eq(teachers.id, classSubjects.teacherId))
-        .where(eq(classSubjects.isClassTeacher, true)),
+        .leftJoin(teachers, and(eq(teachers.id, classSubjects.teacherId), eq(teachers.schoolId, schoolId)))
+        .where(and(eq(classSubjects.isClassTeacher, true), eq(classSubjects.schoolId, schoolId))),
     ]);
 
     const sectionCountByClass = new Map<number, number>();
@@ -183,7 +189,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       const ag = await db
         .select({ s: attendance.status, c: sql<number>`count(*)::int` })
         .from(attendance)
-        .where(and(sql`${attendance.attDate} >= ${from}`, sql`${attendance.attDate} <= ${todayStr()}`, sql`${attendance.studentId} in (select student_id from enrollments where class_id = ${c.id} and status = 'active')`))
+        .where(and(eq(attendance.schoolId, schoolId), sql`${attendance.attDate} >= ${from}`, sql`${attendance.attDate} <= ${todayStr()}`, sql`${attendance.studentId} in (select student_id from enrollments where class_id = ${c.id} and school_id = ${schoolId} and status = 'active')`))
         .groupBy(attendance.status);
       let t = 0, p = 0;
       for (const a of ag) { t += a.c; if (a.s === "P" || a.s === "L") p += a.c; }
@@ -208,7 +214,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     const [exam] = await db
       .select()
       .from(examinations)
-      .where(eq(examinations.status, "published"))
+      .where(and(eq(examinations.status, "published"), eq(examinations.schoolId, schoolId)))
       .orderBy(desc(examinations.endDate))
       .limit(1);
     if (!exam) {
@@ -217,7 +223,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       title = `Results — ${exam.name}`;
       const rows: { cls: string; total: number; done: number; pass: number; avgPct: number; avgGpa: number }[] = [];
       for (const c of allClasses) {
-        const res = await computeClassResults(exam.id, c.id, scale);
+        const res = await computeClassResults(exam.id, c.id, scale, schoolId);
         const done = res.filter((x) => x.totalObtained != null);
         if (done.length === 0) continue;
         rows.push({
@@ -251,7 +257,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       title = `Subject-wise results — ${exam.name}`;
       const rows: { cls: string; subject: string; avg: number; pass: number; total: number }[] = [];
       for (const c of allClasses) {
-        const res = await computeClassResults(exam.id, c.id, scale);
+        const res = await computeClassResults(exam.id, c.id, scale, schoolId);
         if (res.length === 0) continue;
         const done = res.filter((x) => x.totalObtained != null);
         for (const subj of new Set(res.flatMap((x) => x.rows.map((y) => y.subjectName)))) {
@@ -288,7 +294,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       const counts: Record<string, number> = {};
       let total = 0;
       for (const c of allClasses) {
-        const res = await computeClassResults(exam.id, c.id, scale);
+        const res = await computeClassResults(exam.id, c.id, scale, schoolId);
         for (const x of res) {
           if (x.totalObtained == null || x.pct == null) continue;
           const g = gradeFor(x.pct, scale).grade;
@@ -320,9 +326,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     const rows = await db
       .select({
         t: teachers,
-        subjects: sql<number>`(select count(*) from class_subjects where class_subjects.teacher_id = ${teachers.id})::int`,
+        subjects: sql<number>`(select count(*) from class_subjects where class_subjects.teacher_id = ${teachers.id} and class_subjects.school_id = ${schoolId})::int`,
       })
       .from(teachers)
+      .where(eq(teachers.schoolId, schoolId))
       .orderBy(teachers.name);
     body = (
       <table className="tbl">
@@ -346,11 +353,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     const years = await db
       .select({
         y: academicYears,
-        students: sql<number>`(select count(*) from enrollments where enrollments.academic_year_id = ${academicYears.id})::int`,
-        exams: sql<number>`(select count(*) from examinations where examinations.academic_year_id = ${academicYears.id})::int`,
-        notes: sql<number>`(select count(*) from notes where notes.academic_year_id = ${academicYears.id})::int`,
+        students: sql<number>`(select count(*) from enrollments where enrollments.academic_year_id = ${academicYears.id} and enrollments.school_id = ${schoolId})::int`,
+        exams: sql<number>`(select count(*) from examinations where examinations.academic_year_id = ${academicYears.id} and examinations.school_id = ${schoolId})::int`,
+        notes: sql<number>`(select count(*) from notes where notes.academic_year_id = ${academicYears.id} and notes.school_id = ${schoolId})::int`,
       })
       .from(academicYears)
+      .where(eq(academicYears.schoolId, schoolId))
       .orderBy(desc(academicYears.id));
     body = (
       <table className="tbl">

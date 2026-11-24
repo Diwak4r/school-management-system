@@ -24,10 +24,11 @@ export type ScaleRow = {
   isFail: boolean;
 };
 
-export async function getScale(): Promise<ScaleRow[]> {
+export async function getScale(schoolId = 1): Promise<ScaleRow[]> {
   const rows = await db
     .select()
     .from(gradingScale)
+    .where(eq(gradingScale.schoolId, schoolId))
     .orderBy(gradingScale.sortOrder);
 
   return rows.map((r) => ({
@@ -113,8 +114,9 @@ export async function computeClassResults(
   examId: number,
   classId: number,
   scale?: ScaleRow[],
+  schoolId = 1,
 ): Promise<StudentResult[]> {
-  const gradingScaleRows = scale ?? (await getScale());
+  const gradingScaleRows = scale ?? (await getScale(schoolId));
 
   const subRows = await db
     .select({
@@ -135,6 +137,7 @@ export async function computeClassResults(
       and(
         eq(examSubjects.examId, examId),
         eq(examSubjects.classId, classId),
+        eq(examSubjects.schoolId, schoolId),
       ),
     );
 
@@ -151,6 +154,7 @@ export async function computeClassResults(
       and(
         eq(enrollments.classId, classId),
         eq(enrollments.status, "active"),
+        eq(enrollments.schoolId, schoolId),
       ),
     )
     .orderBy(enrollments.rollNo);
@@ -394,8 +398,12 @@ export async function attendancePct(
   studentId: number,
   from?: Date,
   to?: Date,
+  schoolId = 1,
 ) {
-  const conds = [eq(attendance.studentId, studentId)];
+  const conds = [
+    eq(attendance.studentId, studentId),
+    eq(attendance.schoolId, schoolId),
+  ];
 
   if (from) {
     conds.push(
@@ -499,7 +507,7 @@ export const DEFAULT_SCHOOL = {
   website: "www.sjjs.edu.np",
 };
 
-export async function getSchool(): Promise<{
+export async function getSchool(schoolId = 1): Promise<{
   name: string;
   nameNp: string;
   address: string;
@@ -509,6 +517,7 @@ export async function getSchool(): Promise<{
   logoUrl: string | null;
   minAttendance: number;
 }> {
+  // `settings` is a global table (no school_id column), so no scoping applies here.
   const rows = await db.select().from(settingsTable);
   const map = Object.fromEntries(
     rows.map((r) => [r.key, r.value ?? ""]),
@@ -530,6 +539,7 @@ export async function getSchool(): Promise<{
 export async function classLabel(
   classId: number | null,
   sectionId: number | null,
+  schoolId = 1,
 ) {
   if (!classId) return "—";
 
@@ -537,13 +547,13 @@ export async function classLabel(
     db
       .select()
       .from(classes)
-      .where(eq(classes.id, classId))
+      .where(and(eq(classes.id, classId), eq(classes.schoolId, schoolId)))
       .limit(1),
     sectionId
       ? db
           .select()
           .from(sections)
-          .where(eq(sections.id, sectionId))
+          .where(and(eq(sections.id, sectionId), eq(sections.schoolId, schoolId)))
           .limit(1)
       : Promise.resolve([]),
   ]);

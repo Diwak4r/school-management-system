@@ -18,6 +18,7 @@ import {
   settings as settingsTable,
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
+import { currentSchoolId } from "@/lib/tenant";
 import {
   attendancePct,
   computeClassResults,
@@ -35,6 +36,7 @@ export default async function MarksheetPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   const sp = await searchParams;
   const examId = Number(sp.exam ?? 0);
   const studentId = Number(sp.student ?? 0);
@@ -53,6 +55,7 @@ export default async function MarksheetPage({
         and(
           eq(parentChildren.userId, user.id),
           eq(parentChildren.studentId, studentId),
+          eq(parentChildren.schoolId, schoolId),
         ),
       )
       .limit(1);
@@ -70,7 +73,7 @@ export default async function MarksheetPage({
       academicYears,
       eq(academicYears.id, examinations.academicYearId),
     )
-    .where(eq(examinations.id, examId))
+    .where(and(eq(examinations.id, examId), eq(examinations.schoolId, schoolId)))
     .limit(1);
 
   if (!exam) notFound();
@@ -82,7 +85,7 @@ export default async function MarksheetPage({
   const [student] = await db
     .select()
     .from(students)
-    .where(eq(students.id, studentId))
+    .where(and(eq(students.id, studentId), eq(students.schoolId, schoolId)))
     .limit(1);
 
   if (!student) notFound();
@@ -94,7 +97,7 @@ export default async function MarksheetPage({
       subjectId: examSubjects.subjectId,
     })
     .from(examSubjects)
-    .where(eq(examSubjects.examId, examId));
+    .where(and(eq(examSubjects.examId, examId), eq(examSubjects.schoolId, schoolId)));
 
   const classIds = new Set(examSubjectsOf.map((e) => e.classId));
 
@@ -118,23 +121,25 @@ export default async function MarksheetPage({
             )
           : undefined,
         eq(enrollments.academicYearId, exam.exam.academicYearId),
+        eq(enrollments.schoolId, schoolId),
       ),
     )
     .limit(1);
   const classId = enr?.classId ?? null;
 
   const [scale, school, att] = await Promise.all([
-    getScale(),
-    getSchool(),
+    getScale(schoolId),
+    getSchool(schoolId),
     attendancePct(
       studentId,
       exam.exam.startDate ? new Date(`${exam.exam.startDate}T00:00:00`) : undefined,
       new Date(),
+      schoolId,
     ),
   ]);
 
   const resultRow = classId
-    ? (await computeClassResults(examId, classId, scale)).find(
+    ? (await computeClassResults(examId, classId, scale, schoolId)).find(
         (r) => r.studentId === studentId,
       )
     : undefined;
@@ -150,6 +155,7 @@ export default async function MarksheetPage({
       and(
         classId ? eq(classSubjects.classId, classId) : isNull(classSubjects.classId),
         eq(classSubjects.isClassTeacher, true),
+        eq(classSubjects.schoolId, schoolId),
       ),
     )
     .limit(1);
