@@ -1,6 +1,7 @@
 
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
+import { isPlatformAdminUser } from "@/lib/platform-auth";
 import { login } from "@/actions/auth";
 import { Icon, DemoFill, Flash } from "@/components/ui";
 import { SchoolMark } from "@/components/SchoolMark";
@@ -14,10 +15,21 @@ export default async function PortalPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await getSessionUser();
-
-  if (user) redirect("/dashboard");
-
   const sp = await searchParams;
+
+  const requestedNext = typeof sp.next === "string" ? sp.next : "";
+  const safeNext =
+    requestedNext.startsWith("/") && !requestedNext.startsWith("//")
+      ? requestedNext
+      : null;
+
+  if (user) {
+    redirect(
+      safeNext ??
+        (isPlatformAdminUser(user) ? "/superadmin" : "/dashboard"),
+    );
+  }
+
   const err = typeof sp.err === "string" ? sp.err : "";
 
   const features = [
@@ -142,6 +154,7 @@ export default async function PortalPage({
             )}
 
             <form action={login} className="mt-5 space-y-4">
+              {safeNext && <input type="hidden" name="next" value={safeNext} />}
               <label className="block">
                 <span className="lbl">Email address</span>
                 <input

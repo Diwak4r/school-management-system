@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 import { db } from "@/db";
 import { users, sessions, students } from "@/db/schema";
 import { createSession, destroySession, hashPassword, logAudit, requireUser, verifyPassword } from "@/lib/auth";
+import { isPlatformAdminUser } from "@/lib/platform-auth";
 
 export async function flashTo(path: string, msg?: string, err = false) {
   if (!msg) redirect(path);
@@ -35,7 +36,19 @@ export async function login(formData: FormData) {
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
   await createSession(user.id);
   await logAudit(user.id, "Login", "user", user.id, `${user.name} signed in`);
-  redirect("/dashboard");
+
+  const requestedNext = String(formData.get("next") ?? "");
+  const safeNext =
+    requestedNext.startsWith("/") && !requestedNext.startsWith("//")
+      ? requestedNext
+      : null;
+
+  redirect(
+    safeNext ??
+      (isPlatformAdminUser({ id: user.id, email: user.email, role: user.role })
+        ? "/superadmin"
+        : "/dashboard"),
+  );
 }
 
 export async function logout() {

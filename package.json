@@ -7,7 +7,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --conditions=react-server --import tsx --test tests/grading.test.ts tests/auth.test.ts"
+    "test": "node --conditions=react-server --import tsx --test tests/grading.test.ts tests/auth.test.ts",
+    "check:superadmin": "node scripts/check-superadmin.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.2.1",
