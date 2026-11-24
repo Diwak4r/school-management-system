@@ -150,7 +150,8 @@ export async function POST(req: Request) {
     .where(and(eq(academicYears.status, "active"), eq(academicYears.schoolId, schoolId)))
     .limit(1);
 
-  const dir = path.join(process.cwd(), "public", "uploads");
+  const tenantFolder = `school-${schoolId}`;
+  const dir = path.join(process.cwd(), "public", "uploads", tenantFolder);
   await fs.mkdir(dir, { recursive: true });
 
   const safeName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
@@ -169,7 +170,7 @@ export async function POST(req: Request) {
       sectionId,
       subjectId,
       type: "file",
-      url: `/uploads/${safeName}`,
+      url: `/uploads/${tenantFolder}/${safeName}`,
       fileName: file.name,
       academicYearId: year?.id ?? null,
       uploadedById: user.id,
@@ -192,7 +193,7 @@ export async function POST(req: Request) {
     {
       ok: true,
       title,
-      url: `/uploads/${safeName}`,
+      url: `/uploads/${tenantFolder}/${safeName}`,
       noteId: row.id,
     },
     {

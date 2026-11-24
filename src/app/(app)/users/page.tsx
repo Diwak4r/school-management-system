@@ -1,7 +1,7 @@
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { users, students, teachers, sessions } from "@/db/schema";
+import { users, students, teachers, sessions, parentChildren } from "@/db/schema";
 import { requireRole, hashPassword, logAudit } from "@/lib/auth";
 import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
@@ -210,6 +210,63 @@ export async function resetAccountPassword(formData: FormData) {
   await flashTo("/users", `Password reset successfully for ${account.name}.`);
 }
 
+/* ------------------------- Create parent account -------------------------- */
+
+export async function createParentAccount(formData: FormData) {
+  "use server";
+
+  const admin = await requireRole("admin");
+  const schoolId = await currentSchoolId();
+  const name = String(formData.get("name") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const password = String(formData.get("password") ?? "");
+  const studentIds = formData.getAll("studentIds").map(Number).filter((id) => Number.isInteger(id) && id > 0);
+
+  if (!name || !email || password.length < 8 || studentIds.length === 0) {
+    await flashTo("/users", "Name, email, a password of at least 8 characters and at least one child are required.", true);
+  }
+
+  const [duplicate] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+  if (duplicate) await flashTo("/users", "That email is already registered.", true);
+
+  const children = await db
+    .select({ id: students.id })
+    .from(students)
+    .where(and(inArray(students.id, studentIds), eq(students.schoolId, schoolId)));
+  if (children.length !== studentIds.length) {
+    await flashTo("/users", "One or more selected children are not in this school.", true);
+  }
+
+  const [created] = await db
+    .insert(users)
+    .values({
+      schoolId,
+      name,
+      email,
+      passwordHash: hashPassword(password),
+      role: "parent",
+      isActive: true,
+    })
+    .returning({ id: users.id });
+
+  try {
+    await db.insert(parentChildren).values(
+      studentIds.map((studentId) => ({ schoolId, userId: created.id, studentId })),
+    );
+  } catch {
+    // Compensate: a parent without a valid child link must not remain.
+    await db.delete(users).where(eq(users.id, created.id));
+    await flashTo("/users", "Could not link the selected children. No account was created.", true);
+  }
+
+  await logAudit(admin.id, "Parent account created", "user", created.id, `${name} — ${studentIds.length} child(ren)`);
+  await flashTo("/users", `Parent account created for ${name}.`);
+}
+
 /* --------------------------------- Page ----------------------------------- */
 
 export default async function UsersPage() {
@@ -365,6 +422,40 @@ export default async function UsersPage() {
                 />
               </Field>
 
+              <div className="flex justify-end gap-2">
+                <ModalCancel />
+                <button className="btn-primary" type="submit">
+                  <Icon name="check" className="w-4 h-4" />
+                  Create account
+                </button>
+              </div>
+            </form>
+          </FormModal>
+
+          <FormModal
+            title="Create parent login"
+            icon="plus"
+            label="Parent login"
+            wide
+          >
+            <form action={createParentAccount} className="grid gap-3.5">
+              <Field label="Parent name *">
+                <input name="name" required className="inp" />
+              </Field>
+              <Field label="Login email *">
+                <input name="email" type="email" required className="inp" />
+              </Field>
+              <Field label="Initial password *">
+                <input name="password" type="password" minLength={8} required className="inp" autoComplete="new-password" />
+              </Field>
+              <Field label="Linked children *">
+                <select name="studentIds" multiple required size={Math.min(6, Math.max(3, availableStudents.length))} className="inp">
+                  {availableStudents.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} — {s.admissionNo}</option>
+                  ))}
+                </select>
+              </Field>
+              <p className="text-xs text-muted">Hold Ctrl/Cmd to select more than one child.</p>
               <div className="flex justify-end gap-2">
                 <ModalCancel />
                 <button className="btn-primary" type="submit">

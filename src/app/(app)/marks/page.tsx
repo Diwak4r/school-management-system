@@ -87,7 +87,7 @@ export async function submitMarks(formData: FormData) {
       .insert(marks)
       .values({ examSubjectId, studentId, theory: t, practical: p, schoolId })
       .onConflictDoUpdate({
-        target: [marks.examSubjectId, marks.studentId],
+        target: [marks.schoolId, marks.examSubjectId, marks.studentId],
         set: { theory: t, practical: p }
       });
 

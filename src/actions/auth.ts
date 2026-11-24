@@ -10,7 +10,8 @@ import { isPlatformAdminUser } from "@/lib/platform-auth";
 
 export async function flashTo(path: string, msg?: string, err = false) {
   if (!msg) redirect(path);
-  redirect(`${path}?${err ? "flashErr" : "flash"}=${encodeURIComponent(msg)}`);
+  const separator = path.includes("?") ? "&" : "?";
+  redirect(`${path}${separator}${err ? "flashErr" : "flash"}=${encodeURIComponent(msg)}`);
 }
 
 export async function login(formData: FormData) {

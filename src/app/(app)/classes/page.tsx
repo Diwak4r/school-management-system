@@ -4,11 +4,41 @@ import { classes, sections, subjects, teachers, classSubjects, enrollments } fro
 import { requireUser, requireRole, logAudit } from "@/lib/auth";
 import { currentSchoolId } from "@/lib/tenant";
 import { flashTo } from "@/actions/auth";
-import { PageHead, Badge, Icon, ConfirmButton, Field, Empty } from "@/components/ui";
+import { PageHead, Badge, Icon, ConfirmButton, Field, Empty, FormModal, ModalCancel } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 /* ---------------------------------- Actions --------------------------------- */
+
+export async function addClass(formData: FormData) {
+  "use server";
+  const user = await requireRole("admin");
+  const schoolId = await currentSchoolId();
+  const name = String(formData.get("name") ?? "").trim();
+  const level = String(formData.get("level") ?? "").trim() || "Test";
+  if (!name) await flashTo("/classes", "Class name is required.", true);
+
+  const [duplicate] = await db
+    .select({ id: classes.id })
+    .from(classes)
+    .where(and(eq(classes.schoolId, schoolId), eq(classes.name, name)))
+    .limit(1);
+  if (duplicate) await flashTo("/classes", "A class with that name already exists.", true);
+
+  const [maxRow] = await db
+    .select({ value: sql<number>`coalesce(max(${classes.sortOrder}), 0)::int` })
+    .from(classes)
+    .where(eq(classes.schoolId, schoolId));
+
+  await db.insert(classes).values({
+    schoolId,
+    name,
+    level,
+    sortOrder: (maxRow?.value ?? 0) + 1,
+  });
+  await logAudit(user.id, "Class created", "class", undefined, name);
+  await flashTo("/classes", `Class ${name} created.`);
+}
 
 export async function addSection(formData: FormData) {
   "use server";
@@ -142,7 +172,15 @@ export default async function ClassesPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <PageHead title="Classes & Subjects" sub="Structure from ECD to Grade 10 — sections, class teachers and subject teachers" />
+      <PageHead title="Classes & Subjects" sub="Structure from ECD to Grade 10 — sections, class teachers and subject teachers">
+        <FormModal title="Add class" icon="plus" label="Add class">
+          <form action={addClass} className="grid gap-3.5">
+            <Field label="Class name *"><input name="name" required className="inp" placeholder="Test Grade" /></Field>
+            <Field label="Level"><input name="level" className="inp" defaultValue="Test" /></Field>
+            <div className="flex justify-end gap-2"><ModalCancel /><button className="btn-primary btn-sm" type="submit">Add class</button></div>
+          </form>
+        </FormModal>
+      </PageHead>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {classRows.map((r) => (

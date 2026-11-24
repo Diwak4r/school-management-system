@@ -54,7 +54,7 @@ export async function markAttendance(formData: FormData) {
       .insert(attendance)
       .values({ studentId: r.id, attDate: date, status, markedById: user.id, schoolId })
       .onConflictDoUpdate({
-        target: [attendance.studentId, attendance.attDate],
+        target: [attendance.schoolId, attendance.studentId, attendance.attDate],
         set: { status, markedById: user.id },
       });
     n++;

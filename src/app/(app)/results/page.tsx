@@ -38,29 +38,32 @@ export async function setExamStatus(formData: FormData) {
       return;
     }
   }
-  const [row] = await db.select().from(examinations).where(eq(examinations.id, id)).limit(1);
-  await db.update(examinations).set({ status }).where(eq(examinations.id, id));
+  const [row] = await db.select().from(examinations).where(and(eq(examinations.id, id), eq(examinations.schoolId, schoolId))).limit(1);
+  if (!row) await flashTo("/results", "Examination not found in your school.", true);
+  await db.update(examinations).set({ status }).where(and(eq(examinations.id, id), eq(examinations.schoolId, schoolId)));
   await logAudit(user.id, status === "published" ? "Published results" : "Changed exam status", "exam", id, `${row?.name} → ${status}`);
   await flashTo(`/results?exam=${id}`, status === "published" ? "Results published — marks are now locked." : `Examination status set to “${status}”.`);
 }
 
 export default async function ResultsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser();
+  const schoolId = await currentSchoolId();
   const sp = await searchParams;
 
-  if (user.role === "student") return <MyResults studentId={user.studentId!} initialStudent={null} />;
-  if (user.role === "parent") return <MyResults studentId={null} userId={user.id} initialStudent={sp.student ? Number(sp.student) : null} />;
+  if (user.role === "student") return <MyResults studentId={user.studentId!} initialStudent={null} schoolId={schoolId} />;
+  if (user.role === "parent") return <MyResults studentId={null} userId={user.id} initialStudent={sp.student ? Number(sp.student) : null} schoolId={schoolId} />;
 
   const isAdmin = user.role === "admin";
-  const scale = await getScale();
+  const scale = await getScale(schoolId);
 
   const [exams, allClasses] = await Promise.all([
     db
       .select({ id: examinations.id, name: examinations.name, status: examinations.status, endDate: examinations.endDate, year: sql<string>`academic_years.name` })
       .from(examinations)
       .innerJoin(academicYears, eq(academicYears.id, examinations.academicYearId))
+      .where(eq(examinations.schoolId, schoolId))
       .orderBy(desc(examinations.id)),
-    db.select().from(classes).orderBy(classes.sortOrder),
+    db.select().from(classes).where(eq(classes.schoolId, schoolId)).orderBy(classes.sortOrder),
   ]);
 
   const examId = sp.exam ? Number(sp.exam) : exams[0]?.id ?? null;
@@ -74,7 +77,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
         .select({ classId: examSubjects.classId })
         .from(examSubjects)
         .innerJoin(classSubjects, and(eq(classSubjects.classId, examSubjects.classId), eq(classSubjects.subjectId, examSubjects.subjectId)))
-        .where(and(eq(examSubjects.examId, exam.id), eq(classSubjects.teacherId, user.teacherId!)));
+        .where(and(eq(examSubjects.examId, exam.id), eq(examSubjects.schoolId, schoolId), eq(classSubjects.teacherId, user.teacherId!), eq(classSubjects.schoolId, schoolId)));
       const ids = new Set(mine.map((m) => m.classId));
       classList = allClasses.filter((c) => ids.has(c.id));
     } else {
@@ -84,7 +87,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
 
   const requestedClassId = sp.classId ? Number(sp.classId) : null;
   const classId = classList.some((c) => c.id === requestedClassId) ? requestedClassId : classList[0]?.id ?? null;
-  const results: StudentResult[] = exam && classId ? await computeClassResults(exam.id, classId, scale) : [];
+  const results: StudentResult[] = exam && classId ? await computeClassResults(exam.id, classId, scale, schoolId) : [];
   const done = results.filter((r) => r.totalObtained != null);
   const passCount = results.filter((r) => r.result === "PASS").length;
 
@@ -222,8 +225,8 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
 
 /* ----------------------------- Student / parent ---------------------------- */
 
-async function MyResults({ studentId, userId, initialStudent }: { studentId: number | null; userId?: number; initialStudent: number | null }) {
-  const scale = await getScale();
+async function MyResults({ studentId, userId, initialStudent, schoolId }: { studentId: number | null; userId?: number; initialStudent: number | null; schoolId: number }) {
+  const scale = await getScale(schoolId);
   let children: { id: number; name: string }[] = [];
   let effStudent: number | null = studentId;
   if (!studentId && userId) {
@@ -231,7 +234,7 @@ async function MyResults({ studentId, userId, initialStudent }: { studentId: num
       .select({ id: students.id, name: students.name })
       .from(parentChildren)
       .innerJoin(students, eq(students.id, parentChildren.studentId))
-      .where(eq(parentChildren.userId, userId));
+      .where(and(eq(parentChildren.userId, userId), eq(parentChildren.schoolId, schoolId)));
     effStudent = initialStudent && children.find((c) => c.id === initialStudent) ? initialStudent : children[0]?.id ?? null;
   }
 
@@ -244,17 +247,17 @@ async function MyResults({ studentId, userId, initialStudent }: { studentId: num
     );
   }
 
-  const [enr] = await db.select().from(enrollments).where(and(eq(enrollments.studentId, effStudent), eq(enrollments.status, "active"))).limit(1);
+  const [enr] = await db.select().from(enrollments).where(and(eq(enrollments.studentId, effStudent), eq(enrollments.status, "active"), eq(enrollments.schoolId, schoolId))).limit(1);
   const list: { exam: any; gpa: string; pct: number | null; result: string }[] = [];
   if (enr) {
     const exams = await db
       .select({ id: examinations.id, name: examinations.name, endDate: examinations.endDate, year: sql<string>`academic_years.name` })
       .from(examinations)
       .innerJoin(academicYears, eq(academicYears.id, examinations.academicYearId))
-      .where(and(eq(examinations.status, "published"), sql`${examinations.id} in (select exam_id from exam_subjects where class_id = ${enr.classId})`))
+      .where(and(eq(examinations.status, "published"), eq(examinations.schoolId, schoolId), sql`${examinations.id} in (select exam_id from exam_subjects where class_id = ${enr.classId} and school_id = ${schoolId})`))
       .orderBy(desc(examinations.endDate));
     for (const e of exams) {
-      const res = await computeClassResults(e.id, enr.classId, scale);
+      const res = await computeClassResults(e.id, enr.classId, scale, schoolId);
       const mine = res.find((r) => r.studentId === effStudent);
       if (mine) list.push({ exam: e, gpa: mine.gpaDisplay, pct: mine.pct, result: mine.result });
     }
